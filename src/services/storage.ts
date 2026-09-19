@@ -1,4 +1,4 @@
-import { UserProfile, DailyChallenge, MatchAnalytics, LocalDuelRecord } from '../types';
+import { UserProfile, DailyChallenge, MatchAnalytics, LocalDuelRecord, ReplayEvent } from '../types';
 
 const STORAGE_KEYS = {
   PROFILE: 'hyperpulse_profile_v1',
@@ -107,11 +107,78 @@ export function saveDailyChallenges(challenges: DailyChallenge[]): void {
   } catch (e) {}
 }
 
+export function generateSampleReplayEvents(
+  mode: 'solo' | 'duel',
+  perfectHits: number = 18,
+  greatHits: number = 10,
+  misses: number = 2
+): ReplayEvent[] {
+  const events: ReplayEvent[] = [];
+  let time = 800;
+  let combo = 0;
+  const total = perfectHits + greatHits + misses;
+
+  for (let i = 0; i < total; i++) {
+    time += 700 + Math.floor(Math.random() * 450);
+    const x = Math.round(18 + Math.random() * 64);
+    const y = Math.round(20 + Math.random() * 60);
+
+    const isMiss = i === Math.floor(total * 0.4) || i === Math.floor(total * 0.75);
+    const isPowerup = i === 5 || i === 15;
+
+    if (isMiss && misses > 0) {
+      combo = 0;
+      events.push({
+        id: `ev-${i}`,
+        timestampMs: time,
+        type: 'miss',
+        x,
+        y,
+        reactionTimeMs: 440,
+        grade: 'MISS',
+        points: 0,
+        combo: 0,
+        label: 'MISSED TARGET',
+        color: '#f43f5e',
+        player: mode === 'duel' ? ((i % 2 === 0 ? 1 : 2) as 1 | 2) : undefined,
+      });
+    } else {
+      combo++;
+      const isPerfect = i % 3 !== 0;
+      const reaction = isPerfect ? 180 + Math.floor(Math.random() * 45) : 230 + Math.floor(Math.random() * 50);
+      events.push({
+        id: `ev-${i}`,
+        timestampMs: time,
+        type: isPowerup ? 'powerup' : 'hit',
+        x,
+        y,
+        reactionTimeMs: reaction,
+        grade: isPerfect ? 'PERFECT' : 'GREAT',
+        points: isPerfect ? 150 : 120,
+        combo,
+        label: isPowerup ? 'FEVER BOOST' : isPerfect ? 'PERFECT HIT' : 'GREAT HIT',
+        color: isPowerup ? '#f59e0b' : isPerfect ? '#10b981' : '#06b6d4',
+        player: mode === 'duel' ? ((i % 2 === 0 ? 1 : 2) as 1 | 2) : undefined,
+      });
+    }
+  }
+  return events;
+}
+
 export function getMatchAnalytics(): MatchAnalytics[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEYS.ANALYTICS);
     if (raw) {
-      return JSON.parse(raw);
+      const parsed: MatchAnalytics[] = JSON.parse(raw);
+      return parsed.map(item => {
+        if (!item.events || item.events.length === 0) {
+          item.events = generateSampleReplayEvents(item.mode, item.perfectHits, item.greatHits, item.misses);
+        }
+        if (!item.fastestReactionMs) {
+          item.fastestReactionMs = Math.round(item.avgReactionTimeMs * 0.78);
+        }
+        return item;
+      });
     }
   } catch (e) {}
   // Default starter history so performance charts have initial visual beauty
@@ -119,28 +186,45 @@ export function getMatchAnalytics(): MatchAnalytics[] {
     {
       id: 'init-1',
       mode: 'solo',
-      score: 5420,
-      accuracy: 91.5,
-      avgReactionTimeMs: 245,
-      maxCombo: 14,
-      perfectHits: 18,
-      greatHits: 12,
-      misses: 2,
-      date: 'Yesterday',
-      timestamp: Date.now() - 86400000,
-    },
-    {
-      id: 'init-2',
-      mode: 'solo',
       score: 8940,
       accuracy: 94.2,
-      avgReactionTimeMs: 228,
+      avgReactionTimeMs: 218,
+      fastestReactionMs: 174,
       maxCombo: 22,
       perfectHits: 29,
       greatHits: 11,
       misses: 1,
+      durationSeconds: 34,
       date: 'Earlier Today',
       timestamp: Date.now() - 3600000,
+      events: generateSampleReplayEvents('solo', 29, 11, 1),
+    },
+    {
+      id: 'init-2',
+      mode: 'duel',
+      score: 1240,
+      accuracy: 96.0,
+      avgReactionTimeMs: 205,
+      fastestReactionMs: 168,
+      maxCombo: 16,
+      perfectHits: 24,
+      greatHits: 8,
+      misses: 1,
+      durationSeconds: 28,
+      winner: 'Player 1 (Blue)',
+      duelDetails: {
+        player1Name: 'Ace (Blue)',
+        player2Name: 'Blaze (Coral)',
+        p1Score: 1240,
+        p2Score: 980,
+        p1Accuracy: 96.0,
+        p2Accuracy: 88.5,
+        p1AvgReactionMs: 205,
+        p2AvgReactionMs: 242,
+      },
+      date: 'Yesterday',
+      timestamp: Date.now() - 86400000,
+      events: generateSampleReplayEvents('duel', 24, 8, 1),
     }
   ];
 }

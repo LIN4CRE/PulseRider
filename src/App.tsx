@@ -129,8 +129,11 @@ export default function App() {
   };
 
   // Local Duel match complete
-  const handleDuelComplete = (record: LocalDuelRecord) => {
+  const handleDuelComplete = (record: LocalDuelRecord, duelAnalytics?: MatchAnalytics) => {
     saveLocalDuelRecord(record);
+    if (duelAnalytics) {
+      saveMatchAnalytics(duelAnalytics);
+    }
 
     // Update duel win/loss
     const p1Won = record.winner.includes('1') || record.winner.includes('Blue') || record.winner.includes(profile.username);

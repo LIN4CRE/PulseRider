@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Heart, Pause, Play, RotateCcw, Zap, Flame, Shield, ArrowLeft, Trophy, Gauge } from 'lucide-react';
 import confetti from 'canvas-confetti';
-import { UserProfile, MatchAnalytics, PulseTarget } from '../types';
+import { UserProfile, MatchAnalytics, PulseTarget, ReplayEvent } from '../types';
 import { translations } from '../i18n/translations';
 import { soundEngine, triggerHaptic } from '../services/audio';
 
@@ -67,6 +67,8 @@ export const SoloGame: React.FC<SoloGameProps> = ({
   const frameCountRef = useRef(0);
   const lastFpsCheckRef = useRef(performance.now());
   const lastTapHandledTimeRef = useRef(0);
+  const matchStartTimeRef = useRef(Date.now());
+  const replayEventsRef = useRef<ReplayEvent[]>([]);
 
   // 60fps monitor loop
   useEffect(() => {
@@ -95,6 +97,8 @@ export const SoloGame: React.FC<SoloGameProps> = ({
         const timer = setTimeout(() => setCountdown(countdown - 1), 750);
         return () => clearTimeout(timer);
       } else {
+        matchStartTimeRef.current = Date.now();
+        replayEventsRef.current = [];
         setGameState('playing');
         soundEngine.playPowerUp();
       }
@@ -186,7 +190,7 @@ export const SoloGame: React.FC<SoloGameProps> = ({
           expired.forEach(exp => {
             if (exp.type !== 'hazard') {
               // Missed a valid target!
-              handleTargetMiss();
+              handleTargetMiss(exp);
             } else {
               // Successfully avoided a hazard! Award small evasion bonus
               setScore(s => s + 50);
@@ -238,20 +242,35 @@ export const SoloGame: React.FC<SoloGameProps> = ({
     }, 650);
   };
 
-  const handleTargetMiss = useCallback(() => {
+  const handleTargetMiss = useCallback((target?: PulseTarget) => {
     if (hasShield) {
       setHasShield(false);
       soundEngine.playTap('GOOD');
       triggerHaptic('tap');
-      spawnFloatingScore(50, 40, 'SHIELD BROKEN', 'text-purple-400');
+      spawnFloatingScore(target?.x ?? 50, target?.y ?? 40, 'SHIELD BROKEN', 'text-purple-400');
       return;
     }
+
+    // Record miss event for replay
+    replayEventsRef.current.push({
+      id: `ev-miss-${Date.now()}-${Math.random()}`,
+      timestampMs: Math.max(0, Date.now() - matchStartTimeRef.current),
+      type: 'miss',
+      x: target?.x ?? 50,
+      y: target?.y ?? 40,
+      reactionTimeMs: target?.duration ?? 420,
+      grade: 'MISS',
+      points: 0,
+      combo: 0,
+      label: 'MISSED TARGET',
+      color: '#f43f5e',
+    });
 
     soundEngine.playMiss();
     triggerHaptic('error');
     setCombo(0);
     setMissCount(m => m + 1);
-    spawnFloatingScore(50, 35, t.miss, 'text-rose-500');
+    spawnFloatingScore(target?.x ?? 50, target?.y ?? 35, t.miss, 'text-rose-500');
 
     setLives(prevLives => {
       const next = prevLives - 1;
@@ -287,6 +306,20 @@ export const SoloGame: React.FC<SoloGameProps> = ({
 
     // Handle Hazard
     if (target.type === 'hazard') {
+      replayEventsRef.current.push({
+        id: `ev-haz-${Date.now()}-${Math.random()}`,
+        timestampMs: Math.max(0, now - matchStartTimeRef.current),
+        type: 'hazard',
+        x: target.x,
+        y: target.y,
+        reactionTimeMs: elapsed,
+        grade: 'HAZARD',
+        points: -200,
+        combo: 0,
+        label: 'HAZARD HIT',
+        color: '#ef4444',
+      });
+
       soundEngine.playMiss();
       triggerHaptic('heavy');
       setCombo(0);
@@ -350,6 +383,21 @@ export const SoloGame: React.FC<SoloGameProps> = ({
     const currentMultiplier = feverActive ? 3 : Math.min(4, 1 + Math.floor(combo / 8));
     const totalGain = addedPoints * currentMultiplier;
 
+    // Record hit event for match replay
+    replayEventsRef.current.push({
+      id: `ev-hit-${Date.now()}-${Math.random()}`,
+      timestampMs: Math.max(0, now - matchStartTimeRef.current),
+      type: target.type !== 'standard' ? 'powerup' : 'hit',
+      x: target.x,
+      y: target.y,
+      reactionTimeMs: elapsed,
+      grade: hitGrade,
+      points: totalGain,
+      combo: combo + 1,
+      label: target.type === 'golden' ? 'FEVER 3X' : target.type === 'freeze' ? 'SLOW-MO' : target.type === 'surge' ? 'SHIELD' : hitGrade,
+      color: target.color,
+    });
+
     setScore(s => s + totalGain);
     setCombo(c => {
       const next = c + 1;
@@ -410,6 +458,8 @@ export const SoloGame: React.FC<SoloGameProps> = ({
     const avgReaction = reactionTimes.length > 0 
       ? Math.round(reactionTimes.reduce((a, b) => a + b, 0) / reactionTimes.length)
       : 220;
+    const fastestReaction = reactionTimes.length > 0 ? Math.min(...reactionTimes) : Math.round(avgReaction * 0.8);
+    const durationSeconds = Math.max(1, Math.round((Date.now() - matchStartTimeRef.current) / 1000));
 
     const isNewHigh = score > profile.highScore;
     if (isNewHigh) {
@@ -427,12 +477,15 @@ export const SoloGame: React.FC<SoloGameProps> = ({
       score,
       accuracy,
       avgReactionTimeMs: avgReaction,
+      fastestReactionMs: fastestReaction,
       maxCombo,
       perfectHits: perfectCount,
       greatHits: greatCount,
       misses: missCount,
+      durationSeconds,
       date: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       timestamp: Date.now(),
+      events: [...replayEventsRef.current],
     };
 
     onGameOver(analytics, isNewHigh);

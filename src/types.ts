@@ -22,19 +22,49 @@ export interface UserProfile {
   language: Language;
 }
 
+export interface ReplayEvent {
+  id: string;
+  timestampMs: number; // ms from match start
+  type: 'hit' | 'miss' | 'hazard' | 'powerup' | 'sabotage';
+  x: number; // 10-90 percentage
+  y: number; // 10-90 percentage
+  reactionTimeMs?: number;
+  grade?: 'PERFECT' | 'GREAT' | 'GOOD' | 'MISS' | 'HAZARD';
+  points?: number;
+  combo?: number;
+  label?: string;
+  player?: 1 | 2; // For duel matches
+  color?: string;
+}
+
 export interface MatchAnalytics {
   id: string;
   mode: 'solo' | 'duel';
   score: number;
   accuracy: number;
   avgReactionTimeMs: number;
+  fastestReactionMs?: number;
   maxCombo: number;
   perfectHits: number;
   greatHits: number;
   misses: number;
   date: string;
   timestamp: number;
+  durationSeconds?: number;
   winner?: string;
+  duelDetails?: {
+    player1Name: string;
+    player2Name: string;
+    p1Score: number;
+    p2Score: number;
+    p1Accuracy?: number;
+    p2Accuracy?: number;
+    p1AvgReactionMs?: number;
+    p2AvgReactionMs?: number;
+    p1Hits?: number;
+    p2Hits?: number;
+  };
+  events?: ReplayEvent[];
 }
 
 export interface DailyChallenge {

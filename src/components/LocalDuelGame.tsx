@@ -1,13 +1,13 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Swords, RotateCcw, ArrowLeft, Trophy, Zap, Shield, Flame } from 'lucide-react';
 import confetti from 'canvas-confetti';
-import { UserProfile, LocalDuelRecord } from '../types';
+import { UserProfile, LocalDuelRecord, MatchAnalytics, ReplayEvent } from '../types';
 import { translations } from '../i18n/translations';
 import { soundEngine, triggerHaptic } from '../services/audio';
 
 interface LocalDuelGameProps {
   profile: UserProfile;
-  onMatchComplete: (record: LocalDuelRecord) => void;
+  onMatchComplete: (record: LocalDuelRecord, analytics?: MatchAnalytics) => void;
   onBackToMenu: () => void;
 }
 
@@ -49,6 +49,18 @@ export const LocalDuelGame: React.FC<LocalDuelGameProps> = ({
   const [targets, setTargets] = useState<DuelTarget[]>([]);
   const targetCounter = useRef(1);
 
+  // Replay and performance tracking
+  const matchStartTimeRef = useRef(Date.now());
+  const replayEventsRef = useRef<ReplayEvent[]>([]);
+  const p1ReactionTimesRef = useRef<number[]>([]);
+  const p2ReactionTimesRef = useRef<number[]>([]);
+  const p1HitsRef = useRef(0);
+  const p2HitsRef = useRef(0);
+  const p1MissesRef = useRef(0);
+  const p2MissesRef = useRef(0);
+  const p1MaxComboRef = useRef(0);
+  const p2MaxComboRef = useRef(0);
+
   // Countdown
   useEffect(() => {
     if (gameState === 'countdown') {
@@ -57,6 +69,16 @@ export const LocalDuelGame: React.FC<LocalDuelGameProps> = ({
         const timer = setTimeout(() => setCountdown(countdown - 1), 800);
         return () => clearTimeout(timer);
       } else {
+        matchStartTimeRef.current = Date.now();
+        replayEventsRef.current = [];
+        p1ReactionTimesRef.current = [];
+        p2ReactionTimesRef.current = [];
+        p1HitsRef.current = 0;
+        p2HitsRef.current = 0;
+        p1MissesRef.current = 0;
+        p2MissesRef.current = 0;
+        p1MaxComboRef.current = 0;
+        p2MaxComboRef.current = 0;
         setGameState('playing');
         soundEngine.playPowerUp();
       }
@@ -136,7 +158,35 @@ export const LocalDuelGame: React.FC<LocalDuelGameProps> = ({
 
     const cleaner = setInterval(() => {
       const now = Date.now();
-      setTargets(cur => cur.filter(t => now - t.spawnTime <= t.duration));
+      setTargets(cur => {
+        const expired = cur.filter(t => now - t.spawnTime > t.duration);
+        if (expired.length > 0) {
+          expired.forEach(exp => {
+            if (exp.player === 1) {
+              p1MissesRef.current++;
+              setP1Combo(0);
+            } else {
+              p2MissesRef.current++;
+              setP2Combo(0);
+            }
+            replayEventsRef.current.push({
+              id: `duel-miss-${exp.id}-${Date.now()}`,
+              timestampMs: Math.max(0, now - matchStartTimeRef.current),
+              type: 'miss',
+              x: exp.x,
+              y: exp.y,
+              player: exp.player,
+              reactionTimeMs: exp.duration,
+              grade: 'MISS',
+              points: 0,
+              combo: 0,
+              label: `P${exp.player} MISSED`,
+              color: '#f43f5e',
+            });
+          });
+        }
+        return cur.filter(t => now - t.spawnTime <= t.duration);
+      });
     }, 120);
 
     return () => clearInterval(cleaner);
@@ -155,7 +205,36 @@ export const LocalDuelGame: React.FC<LocalDuelGameProps> = ({
     setTargets(cur => cur.filter(t => t.id !== target.id));
 
     const isP1 = target.player === 1;
-    soundEngine.playTap('PERFECT', isP1 ? p1Combo + 1 : p2Combo + 1);
+    const now = Date.now();
+    const elapsed = now - target.spawnTime;
+    const currentCombo = isP1 ? p1Combo : p2Combo;
+    const nextCombo = currentCombo + 1;
+    const mult = 1 + Math.floor(currentCombo / 6);
+    const earnedPoints = target.points * mult;
+
+    if (isP1) {
+      p1ReactionTimesRef.current.push(elapsed);
+      p1HitsRef.current++;
+      p1MaxComboRef.current = Math.max(p1MaxComboRef.current, nextCombo);
+      setP1Combo(c => c + 1);
+      setP1Score(s => {
+        const next = s + earnedPoints;
+        if (next >= 1200) setTimeout(() => endMatch(), 50);
+        return next;
+      });
+    } else {
+      p2ReactionTimesRef.current.push(elapsed);
+      p2HitsRef.current++;
+      p2MaxComboRef.current = Math.max(p2MaxComboRef.current, nextCombo);
+      setP2Combo(c => c + 1);
+      setP2Score(s => {
+        const next = s + earnedPoints;
+        if (next >= 1200) setTimeout(() => endMatch(), 50);
+        return next;
+      });
+    }
+
+    soundEngine.playTap('PERFECT', nextCombo);
     triggerHaptic('tap');
 
     // Sabotage activates opponent glitch
@@ -170,23 +249,21 @@ export const LocalDuelGame: React.FC<LocalDuelGameProps> = ({
       }
     }
 
-    if (isP1) {
-      setP1Combo(c => c + 1);
-      const mult = 1 + Math.floor(p1Combo / 6);
-      setP1Score(s => {
-        const next = s + target.points * mult;
-        if (next >= 1200) setTimeout(() => endMatch(), 50);
-        return next;
-      });
-    } else {
-      setP2Combo(c => c + 1);
-      const mult = 1 + Math.floor(p2Combo / 6);
-      setP2Score(s => {
-        const next = s + target.points * mult;
-        if (next >= 1200) setTimeout(() => endMatch(), 50);
-        return next;
-      });
-    }
+    // Record replay event
+    replayEventsRef.current.push({
+      id: `duel-hit-${Date.now()}-${Math.random()}`,
+      timestampMs: Math.max(0, now - matchStartTimeRef.current),
+      type: target.type === 'sabotage' ? 'sabotage' : target.type === 'golden' ? 'powerup' : 'hit',
+      x: target.x,
+      y: target.y,
+      player: target.player,
+      reactionTimeMs: elapsed,
+      grade: elapsed < 230 ? 'PERFECT' : 'GREAT',
+      points: earnedPoints,
+      combo: nextCombo,
+      label: target.type === 'sabotage' ? 'SABOTAGE STRIKE' : target.type === 'golden' ? 'GOLD PULSE' : elapsed < 230 ? 'PERFECT TAP' : 'HIT',
+      color: target.color,
+    });
   };
 
   const endMatch = () => {
@@ -215,7 +292,56 @@ export const LocalDuelGame: React.FC<LocalDuelGameProps> = ({
       date: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     };
 
-    onMatchComplete(record);
+    const p1Total = p1HitsRef.current + p1MissesRef.current;
+    const p1Acc = p1Total > 0 ? Math.round((p1HitsRef.current / p1Total) * 1000) / 10 : 92;
+    const p2Total = p2HitsRef.current + p2MissesRef.current;
+    const p2Acc = p2Total > 0 ? Math.round((p2HitsRef.current / p2Total) * 1000) / 10 : 88;
+
+    const p1Avg = p1ReactionTimesRef.current.length > 0
+      ? Math.round(p1ReactionTimesRef.current.reduce((a: number, b: number) => a + b, 0) / p1ReactionTimesRef.current.length)
+      : 235;
+    const p2Avg = p2ReactionTimesRef.current.length > 0
+      ? Math.round(p2ReactionTimesRef.current.reduce((a: number, b: number) => a + b, 0) / p2ReactionTimesRef.current.length)
+      : 250;
+
+    const fastestReaction = Math.min(
+      ...(p1ReactionTimesRef.current.length > 0 ? p1ReactionTimesRef.current : [220]),
+      ...(p2ReactionTimesRef.current.length > 0 ? p2ReactionTimesRef.current : [230])
+    );
+
+    const durationSeconds = Math.max(1, Math.round((Date.now() - matchStartTimeRef.current) / 1000));
+
+    const duelAnalytics: MatchAnalytics = {
+      id: `duel_analytics_${Date.now()}`,
+      mode: 'duel',
+      score: Math.max(p1Score, p2Score),
+      accuracy: p1Acc,
+      avgReactionTimeMs: p1Avg,
+      fastestReactionMs: fastestReaction,
+      maxCombo: Math.max(p1MaxComboRef.current, p2MaxComboRef.current, 1),
+      perfectHits: p1HitsRef.current,
+      greatHits: p2HitsRef.current,
+      misses: p1MissesRef.current + p2MissesRef.current,
+      durationSeconds,
+      winner,
+      duelDetails: {
+        player1Name: `${profile.username} (Blue)`,
+        player2Name: 'Challenger (Coral)',
+        p1Score,
+        p2Score,
+        p1Accuracy: p1Acc,
+        p2Accuracy: p2Acc,
+        p1AvgReactionMs: p1Avg,
+        p2AvgReactionMs: p2Avg,
+        p1Hits: p1HitsRef.current,
+        p2Hits: p2HitsRef.current,
+      },
+      date: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      timestamp: Date.now(),
+      events: [...replayEventsRef.current],
+    };
+
+    onMatchComplete(record, duelAnalytics);
   };
 
   const totalPoints = Math.max(1, p1Score + p2Score);

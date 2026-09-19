@@ -3,6 +3,7 @@ import { Activity, ArrowLeft, Zap, Target, Flame, Swords, CheckCircle2, Trending
 import { UserProfile, MatchAnalytics } from '../types';
 import { translations } from '../i18n/translations';
 import { getMatchAnalytics } from '../services/storage';
+import { RecentMatchReplay } from './RecentMatchReplay';
 
 interface AnalyticsViewProps {
   profile: UserProfile;
@@ -85,6 +86,9 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
       </div>
 
       <div className="space-y-3.5 flex-1 overflow-y-auto pb-6">
+        {/* Most Recent Match Summary Replay */}
+        <RecentMatchReplay matches={history} profile={profile} />
+
         {/* Reaction Time Hero Card */}
         <div className="p-4 rounded-2xl bg-gradient-to-br from-cyan-950/40 via-slate-900 to-slate-900 border border-slate-800 shadow-md">
           <div className="flex items-center justify-between mb-2">

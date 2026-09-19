@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Swords, RotateCcw, ArrowLeft, Trophy, Zap, Shield, Flame } from 'lucide-react';
+import { Swords, RotateCcw, ArrowLeft, Trophy, Zap, Shield, Flame, Sparkles } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { UserProfile, LocalDuelRecord, MatchAnalytics, ReplayEvent } from '../types';
 import { translations } from '../i18n/translations';
 import { soundEngine, triggerHaptic } from '../services/audio';
+import { TargetGlyph } from './TargetGlyph';
 
 interface LocalDuelGameProps {
   profile: UserProfile;
@@ -20,7 +21,17 @@ interface DuelTarget {
   spawnTime: number;
   color: string;
   points: number;
-  type: 'standard' | 'golden' | 'sabotage';
+  type: 'standard' | 'golden' | 'sabotage' | 'multi' | 'vortex';
+  hitsRemaining?: number;
+  maxHits?: number;
+}
+
+interface Shockwave {
+  id: number;
+  player: 1 | 2;
+  x: number;
+  y: number;
+  color: string;
 }
 
 export const LocalDuelGame: React.FC<LocalDuelGameProps> = ({
@@ -46,8 +57,9 @@ export const LocalDuelGame: React.FC<LocalDuelGameProps> = ({
   const [p1Sabotaged, setP1Sabotaged] = useState(false);
   const [p2Sabotaged, setP2Sabotaged] = useState(false);
 
-  // Targets
+  // Targets & Shockwaves
   const [targets, setTargets] = useState<DuelTarget[]>([]);
+  const [shockwaves, setShockwaves] = useState<Shockwave[]>([]);
   const targetCounter = useRef(1);
 
   // Replay and performance tracking
@@ -133,36 +145,53 @@ export const LocalDuelGame: React.FC<LocalDuelGameProps> = ({
         const p2Targets = cur.filter(t => t.player === 2);
         const newTargets = [...cur];
 
-        if (p1Targets.length < maxTargetsPerPlayer) {
+        const generateTarget = (player: 1 | 2): DuelTarget => {
           const rand = Math.random();
-          const type: DuelTarget['type'] = rand < sabotageChance ? 'sabotage' : rand < goldenChance ? 'golden' : 'standard';
-          newTargets.push({
+          let type: DuelTarget['type'] = 'standard';
+          let color = player === 1 ? '#38bdf8' : '#f43f5e';
+          let points = 100;
+          let hitsRemaining = 1;
+
+          if (rand < sabotageChance) {
+            type = 'sabotage';
+            color = '#ec4899';
+            points = 180;
+          } else if (rand < sabotageChance + 0.18) {
+            type = 'golden';
+            color = '#f59e0b';
+            points = 250;
+          } else if (rand < sabotageChance + 0.28) {
+            type = 'multi';
+            color = '#f43f5e';
+            points = 350;
+            hitsRemaining = 2;
+          } else if (rand < sabotageChance + 0.36) {
+            type = 'vortex';
+            color = '#a855f7';
+            points = 280;
+          }
+
+          return {
             id: targetCounter.current++,
-            player: 1,
+            player,
             x: Math.floor(15 + Math.random() * 70),
             y: Math.floor(20 + Math.random() * 60),
             duration: baseDuration,
             spawnTime: Date.now(),
-            color: type === 'sabotage' ? '#ec4899' : type === 'golden' ? '#f59e0b' : '#38bdf8',
-            points: type === 'golden' ? 250 : 100,
+            color,
+            points,
             type,
-          });
+            hitsRemaining,
+            maxHits: hitsRemaining,
+          };
+        };
+
+        if (p1Targets.length < maxTargetsPerPlayer) {
+          newTargets.push(generateTarget(1));
         }
 
         if (p2Targets.length < maxTargetsPerPlayer) {
-          const rand = Math.random();
-          const type: DuelTarget['type'] = rand < sabotageChance ? 'sabotage' : rand < goldenChance ? 'golden' : 'standard';
-          newTargets.push({
-            id: targetCounter.current++,
-            player: 2,
-            x: Math.floor(15 + Math.random() * 70),
-            y: Math.floor(20 + Math.random() * 60),
-            duration: baseDuration,
-            spawnTime: Date.now(),
-            color: type === 'sabotage' ? '#ec4899' : type === 'golden' ? '#f59e0b' : '#f43f5e',
-            points: type === 'golden' ? 250 : 100,
-            type,
-          });
+          newTargets.push(generateTarget(2));
         }
 
         return newTargets;
@@ -212,6 +241,20 @@ export const LocalDuelGame: React.FC<LocalDuelGameProps> = ({
     return () => clearInterval(cleaner);
   }, [gameState]);
 
+  const spawnShockwave = (player: 1 | 2, x: number, y: number, color: string) => {
+    const item: Shockwave = {
+      id: Date.now() + Math.random(),
+      player,
+      x,
+      y,
+      color,
+    };
+    setShockwaves(prev => [...prev.slice(-6), item]);
+    setTimeout(() => {
+      setShockwaves(prev => prev.filter(s => s.id !== item.id));
+    }, 480);
+  };
+
   // Target Tap Handler
   const handleTap = (target: DuelTarget, e: React.PointerEvent | React.TouchEvent | React.MouseEvent) => {
     e.preventDefault();
@@ -221,12 +264,23 @@ export const LocalDuelGame: React.FC<LocalDuelGameProps> = ({
     }
     if (gameState !== 'playing') return;
 
-    // Remove target immediately
-    setTargets(cur => cur.filter(t => t.id !== target.id));
-
     const isP1 = target.player === 1;
     const now = Date.now();
     const elapsed = now - target.spawnTime;
+
+    // Multi-tap check
+    if (target.type === 'multi' && target.hitsRemaining && target.hitsRemaining > 1) {
+      soundEngine.playMultiTapCrack(1);
+      triggerHaptic('tap');
+      spawnShockwave(target.player, target.x, target.y, target.color);
+      setTargets(cur => cur.map(t => t.id === target.id ? { ...t, hitsRemaining: (t.hitsRemaining || 2) - 1 } : t));
+      return;
+    }
+
+    // Remove target immediately
+    setTargets(cur => cur.filter(t => t.id !== target.id));
+    spawnShockwave(target.player, target.x, target.y, target.color);
+
     const currentCombo = isP1 ? p1Combo : p2Combo;
     const nextCombo = currentCombo + 1;
     const mult = 1 + Math.floor(currentCombo / 6);
@@ -254,8 +308,28 @@ export const LocalDuelGame: React.FC<LocalDuelGameProps> = ({
       });
     }
 
-    soundEngine.playTap('PERFECT', nextCombo);
+    // Combo milestones
+    if (nextCombo > 0 && nextCombo % 5 === 0) {
+      soundEngine.playComboMilestone(nextCombo);
+    } else {
+      soundEngine.playTap('PERFECT', nextCombo);
+    }
     triggerHaptic('tap');
+
+    // Vortex bomb: clear player's half
+    if (target.type === 'vortex') {
+      soundEngine.playVortexBlast();
+      triggerHaptic('heavy');
+      setTargets(cur => {
+        const cleared = cur.filter(t => t.player === target.player && t.id !== target.id);
+        const bonus = cleared.length * 120;
+        if (bonus > 0) {
+          if (isP1) setP1Score(s => s + bonus);
+          else setP2Score(s => s + bonus);
+        }
+        return cur.filter(t => t.player !== target.player);
+      });
+    }
 
     // Sabotage activates opponent glitch
     if (target.type === 'sabotage') {
@@ -403,6 +477,22 @@ export const LocalDuelGame: React.FC<LocalDuelGameProps> = ({
           </div>
         )}
 
+        {/* Player 2 Shockwaves */}
+        {shockwaves.filter(sw => sw.player === 2).map(sw => (
+          <div
+            key={sw.id}
+            className="anim-shockwave"
+            style={{
+              left: `${sw.x}%`,
+              top: `${sw.y}%`,
+              width: '70px',
+              height: '70px',
+              borderColor: sw.color,
+              boxShadow: `0 0 14px ${sw.color}`,
+            }}
+          />
+        ))}
+
         {/* Player 2 Targets */}
         {targets.filter(t => t.player === 2).map(target => (
           <div
@@ -430,22 +520,24 @@ export const LocalDuelGame: React.FC<LocalDuelGameProps> = ({
                 animationDuration: '6s',
                 borderColor: `${target.color}66`,
               }}
-              className="absolute inset-1.5 rounded-full border border-dashed opacity-70 animate-spin pointer-events-none"
+              className="absolute inset-1 rounded-full border border-dashed opacity-70 animate-spin pointer-events-none"
             />
-            <div
-              style={{
-                backgroundColor: target.type === 'sabotage' ? '#ec4899' : target.type === 'golden' ? '#f59e0b' : '#f43f5e',
-                boxShadow: `0 0 16px ${target.color}`,
-              }}
-              className="w-11 h-11 rounded-full flex items-center justify-center font-bold text-slate-950 text-xs shadow-lg pointer-events-none"
-            >
-              {target.type === 'sabotage' ? (
-                <Zap className="w-4 h-4 text-white fill-white animate-bounce" />
-              ) : target.type === 'golden' ? (
-                <Flame className="w-4 h-4 text-slate-950 fill-slate-950" />
-              ) : (
-                <span className="text-white font-mono font-extrabold text-xs">PULSE</span>
-              )}
+
+            {/* Multi-hit badge */}
+            {target.type === 'multi' && (
+              <div className="absolute -top-1 -right-1 z-10 px-1.5 py-0.5 rounded-full bg-pink-500 text-white font-mono font-black text-[9px] border border-white shadow">
+                {target.hitsRemaining}x
+              </div>
+            )}
+
+            <div className="pointer-events-none transition-transform">
+              <TargetGlyph
+                type={target.type}
+                color={target.color}
+                size={40}
+                hitsRemaining={target.hitsRemaining}
+                maxHits={target.maxHits}
+              />
             </div>
           </div>
         ))}
@@ -528,6 +620,22 @@ export const LocalDuelGame: React.FC<LocalDuelGameProps> = ({
           </div>
         )}
 
+        {/* Player 1 Shockwaves */}
+        {shockwaves.filter(sw => sw.player === 1).map(sw => (
+          <div
+            key={sw.id}
+            className="anim-shockwave"
+            style={{
+              left: `${sw.x}%`,
+              top: `${sw.y}%`,
+              width: '70px',
+              height: '70px',
+              borderColor: sw.color,
+              boxShadow: `0 0 14px ${sw.color}`,
+            }}
+          />
+        ))}
+
         {/* Player 1 Targets */}
         {targets.filter(t => t.player === 1).map(target => (
           <div
@@ -555,22 +663,24 @@ export const LocalDuelGame: React.FC<LocalDuelGameProps> = ({
                 animationDuration: '6s',
                 borderColor: `${target.color}66`,
               }}
-              className="absolute inset-1.5 rounded-full border border-dashed opacity-70 animate-spin pointer-events-none"
+              className="absolute inset-1 rounded-full border border-dashed opacity-70 animate-spin pointer-events-none"
             />
-            <div
-              style={{
-                backgroundColor: target.type === 'sabotage' ? '#ec4899' : target.type === 'golden' ? '#f59e0b' : '#0284c7',
-                boxShadow: `0 0 16px ${target.color}`,
-              }}
-              className="w-11 h-11 rounded-full flex items-center justify-center font-bold text-slate-950 text-xs shadow-lg pointer-events-none"
-            >
-              {target.type === 'sabotage' ? (
-                <Zap className="w-4 h-4 text-white fill-white animate-bounce" />
-              ) : target.type === 'golden' ? (
-                <Flame className="w-4 h-4 text-slate-950 fill-slate-950" />
-              ) : (
-                <span className="text-white font-mono font-extrabold text-xs">PULSE</span>
-              )}
+
+            {/* Multi-hit badge */}
+            {target.type === 'multi' && (
+              <div className="absolute -top-1 -right-1 z-10 px-1.5 py-0.5 rounded-full bg-pink-500 text-white font-mono font-black text-[9px] border border-white shadow">
+                {target.hitsRemaining}x
+              </div>
+            )}
+
+            <div className="pointer-events-none transition-transform">
+              <TargetGlyph
+                type={target.type}
+                color={target.color}
+                size={40}
+                hitsRemaining={target.hitsRemaining}
+                maxHits={target.maxHits}
+              />
             </div>
           </div>
         ))}

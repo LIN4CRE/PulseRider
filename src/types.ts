@@ -21,6 +21,7 @@ export interface UserProfile {
   theme: 'dark' | 'light';
   language: Language;
   speedPreference?: 'standard' | 'turbo' | 'overdrive';
+  skinPreference?: 'cyber' | 'synthwave' | 'emerald' | 'hyper';
 }
 
 export interface ReplayEvent {
@@ -49,6 +50,7 @@ export interface MatchAnalytics {
   perfectHits: number;
   greatHits: number;
   misses: number;
+  peakDynamicDifficulty?: number;
   date: string;
   timestamp: number;
   durationSeconds?: number;
@@ -110,9 +112,11 @@ export interface PulseTarget {
   spawnTime: number;
   duration: number;
   points: number;
-  type: 'standard' | 'golden' | 'hazard' | 'freeze' | 'surge';
+  type: 'standard' | 'golden' | 'hazard' | 'freeze' | 'surge' | 'multi' | 'vortex' | 'phantom';
   color: string;
   tapped?: boolean;
+  hitsRemaining?: number;
+  maxHits?: number;
 }
 
 export interface GameEvent {

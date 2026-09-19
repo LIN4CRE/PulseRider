@@ -202,15 +202,22 @@ export const RecentMatchReplay: React.FC<RecentMatchReplayProps> = ({ matches, p
             </div>
           </div>
 
-          <span
-            className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider border ${
-              activeMatch.mode === 'duel'
-                ? 'bg-rose-500/20 text-rose-300 border-rose-500/40'
-                : 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40'
-            }`}
-          >
-            {activeMatch.mode === 'duel' ? '1v1 Duel' : 'Solo Rush'}
-          </span>
+          <div className="flex items-center gap-1.5">
+            {activeMatch.peakDynamicDifficulty && (
+              <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider border bg-purple-500/20 text-purple-300 border-purple-500/40 font-mono">
+                ⚡ {activeMatch.peakDynamicDifficulty.toFixed(2)}x PACE
+              </span>
+            )}
+            <span
+              className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider border ${
+                activeMatch.mode === 'duel'
+                  ? 'bg-rose-500/20 text-rose-300 border-rose-500/40'
+                  : 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40'
+              }`}
+            >
+              {activeMatch.mode === 'duel' ? '1v1 Duel' : 'Solo Rush'}
+            </span>
+          </div>
         </div>
 
         {/* Solo vs Duel Switcher */}

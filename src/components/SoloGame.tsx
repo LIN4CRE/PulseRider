@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Heart, Pause, Play, RotateCcw, Zap, Flame, Shield, ArrowLeft, Trophy, Gauge } from 'lucide-react';
+import { Heart, Pause, Play, RotateCcw, Zap, Flame, Shield, ArrowLeft, Trophy, Gauge, Sparkles, Palette, Activity } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { UserProfile, MatchAnalytics, PulseTarget, ReplayEvent } from '../types';
 import { translations } from '../i18n/translations';
 import { soundEngine, triggerHaptic } from '../services/audio';
+import { TargetGlyph } from './TargetGlyph';
 
 interface SoloGameProps {
   profile: UserProfile;
@@ -30,6 +31,13 @@ interface HitParticle {
   size: number;
 }
 
+interface Shockwave {
+  id: number;
+  x: number;
+  y: number;
+  color: string;
+}
+
 export const SoloGame: React.FC<SoloGameProps> = ({
   profile,
   onGameOver,
@@ -40,6 +48,7 @@ export const SoloGame: React.FC<SoloGameProps> = ({
 
   const [gameState, setGameState] = useState<'countdown' | 'playing' | 'paused' | 'ended'>('countdown');
   const [speedMode, setSpeedMode] = useState<'turbo' | 'overdrive' | 'standard'>(profile.speedPreference || 'turbo');
+  const [skin, setSkin] = useState<'cyber' | 'synthwave' | 'emerald' | 'hyper'>(profile.skinPreference || 'cyber');
   const [countdown, setCountdown] = useState(3);
   const [score, setScore] = useState(0);
   const [combo, setCombo] = useState(0);
@@ -48,8 +57,11 @@ export const SoloGame: React.FC<SoloGameProps> = ({
   const [hasShield, setHasShield] = useState(false);
   const [feverActive, setFeverActive] = useState(false);
   const [feverTimer, setFeverTimer] = useState(0);
+  const [feverEnergy, setFeverEnergy] = useState(0); // 0 to 100%
   const [slowMoActive, setSlowMoActive] = useState(false);
   const [currentFps, setCurrentFps] = useState(60);
+  const [latestReactionMs, setLatestReactionMs] = useState<number | null>(null);
+  const [fastestReactionMs, setFastestReactionMs] = useState<number | null>(null);
 
   // Performance analytics tracking
   const [perfectCount, setPerfectCount] = useState(0);
@@ -57,9 +69,85 @@ export const SoloGame: React.FC<SoloGameProps> = ({
   const [missCount, setMissCount] = useState(0);
   const [reactionTimes, setReactionTimes] = useState<number[]>([]);
 
-  // Floating score tags & particle sparks
+  // Dynamic Difficulty Adjustment (DDA) Engine
+  // Evaluates rolling accuracy and unbroken combo in real-time to adjust spawn interval, target lifetime, and timing windows
+  const [dynamicDifficulty, setDynamicDifficulty] = useState<number>(1.0);
+  const [peakDynamicDifficulty, setPeakDynamicDifficulty] = useState<number>(1.0);
+  const [recentAccuracyPct, setRecentAccuracyPct] = useState<number>(100);
+  const recentOutcomesRef = useRef<Array<'PERFECT' | 'GREAT' | 'GOOD' | 'MISS'>>([]);
+  const dynamicDifficultyRef = useRef<number>(1.0);
+  const lastTierRef = useRef<'RECOVER' | 'STEADY' | 'SURGE' | 'HYPER' | 'OVERLOAD'>('STEADY');
+
+  const getDifficultyTier = useCallback((diff: number): 'RECOVER' | 'STEADY' | 'SURGE' | 'HYPER' | 'OVERLOAD' => {
+    if (diff >= 1.75) return 'OVERLOAD';
+    if (diff >= 1.45) return 'HYPER';
+    if (diff >= 1.20) return 'SURGE';
+    if (diff >= 0.95) return 'STEADY';
+    return 'RECOVER';
+  }, []);
+
+  const difficultyTier = getDifficultyTier(dynamicDifficulty);
+
+  // Dynamic timing window tolerances:
+  // Baseline (1.0x): PERFECT tolerance = 0.100, GREAT tolerance = 0.200
+  // Overload (1.8x+): PERFECT tolerance narrows down to ~0.060, GREAT narrows down to ~0.135
+  // Recover (< 1.0x): Windows expand up to 0.115 and 0.225 to assist recovery
+  const perfectTolerance = Math.max(0.048, 0.10 / Math.pow(dynamicDifficulty, 0.75));
+  const greatTolerance = Math.max(0.095, 0.20 / Math.pow(dynamicDifficulty, 0.65));
+
+  const updateDynamicDifficulty = useCallback((outcome: 'PERFECT' | 'GREAT' | 'GOOD' | 'MISS', currentCombo: number) => {
+    const history = [...recentOutcomesRef.current.slice(-11), outcome];
+    recentOutcomesRef.current = history;
+
+    const total = history.length;
+    const hits = history.filter(o => o !== 'MISS').length;
+    const perfects = history.filter(o => o === 'PERFECT').length;
+    const misses = history.filter(o => o === 'MISS').length;
+
+    const accPct = total > 0 ? Math.round((hits / total) * 100) : 100;
+    setRecentAccuracyPct(accPct);
+
+    // 1. Combo Factor: rewards unbroken precision streaks (up to +0.55x at 18+ combo)
+    const comboFactor = Math.min(0.55, currentCombo * 0.032);
+
+    // 2. Accuracy Factor: rewards sustained PERFECT/GREAT hit rate (up to +0.35x)
+    const accRatio = hits / total;
+    const perfectRatio = perfects / total;
+    const accuracyFactor = (accRatio - 0.70) * 0.45 + (perfectRatio * 0.20);
+
+    // 3. Struggle / Miss dampener: gives recovery window when player misses
+    const missPenalty = (misses / total) * 0.50;
+
+    // Aggregate dynamic multiplier: ranges from 0.80 (recovery aid) to 1.95 (peak flow overload)
+    const rawMultiplier = 1.0 + comboFactor + accuracyFactor - missPenalty;
+    const clamped = Math.min(1.95, Math.max(0.80, Math.round(rawMultiplier * 100) / 100));
+
+    dynamicDifficultyRef.current = clamped;
+    setDynamicDifficulty(clamped);
+    setPeakDynamicDifficulty(prev => Math.max(prev, clamped));
+
+    // Audio & visual alert when crossing into higher difficulty tiers!
+    const newTier = getDifficultyTier(clamped);
+    const oldTier = lastTierRef.current;
+    if (newTier !== oldTier) {
+      lastTierRef.current = newTier;
+      if (clamped >= 1.20 && (
+        (newTier === 'OVERLOAD' && oldTier !== 'OVERLOAD') ||
+        (newTier === 'HYPER' && oldTier === 'SURGE') ||
+        (newTier === 'SURGE' && oldTier === 'STEADY')
+      )) {
+        soundEngine.playComboMilestone(10);
+        triggerHaptic('success');
+        const tierLabel = newTier === 'OVERLOAD' ? '⚡ OVERLOAD TEMPO [1.8x]' : newTier === 'HYPER' ? '🔥 HYPER INTENSITY [1.5x]' : '⚡ TEMPO SURGE [1.2x]';
+        spawnFloatingScore(50, 30, tierLabel, newTier === 'OVERLOAD' ? 'text-purple-300' : newTier === 'HYPER' ? 'text-rose-400' : 'text-amber-400');
+      }
+    }
+  }, [getDifficultyTier]);
+
+  // Floating score tags, shockwaves & particle sparks
   const [floatingScores, setFloatingScores] = useState<FloatingScore[]>([]);
   const [particles, setParticles] = useState<HitParticle[]>([]);
+  const [shockwaves, setShockwaves] = useState<Shockwave[]>([]);
 
   // Targets currently on board
   const [targets, setTargets] = useState<PulseTarget[]>([]);
@@ -144,11 +232,21 @@ export const SoloGame: React.FC<SoloGameProps> = ({
       hazardChance = 0.11;
     }
 
-    const intervalTime = slowMoActive ? baseInterval * 1.4 : baseInterval;
+    // Dynamic Difficulty Adjustment:
+    // Scale spawn interval and target collapse duration dynamically based on real-time combo & accuracy
+    const currentDiff = dynamicDifficultyRef.current;
+    const intervalTime = slowMoActive
+      ? Math.round(baseInterval * 1.4)
+      : Math.max(120, Math.round(baseInterval / currentDiff));
+    const effectiveMaxTargets = currentDiff >= 1.70 ? maxTargets + 2 : currentDiff >= 1.35 ? maxTargets + 1 : maxTargets;
+    const effectiveHazardChance = currentDiff >= 1.50 ? Math.min(0.24, hazardChance * 1.25) : hazardChance;
+
+    // Get color based on selected theme skin
+    const standardColor = skin === 'synthwave' ? '#f43f5e' : skin === 'emerald' ? '#10b981' : skin === 'hyper' ? '#8b5cf6' : '#38bdf8';
 
     const spawner = setInterval(() => {
       setTargets(current => {
-        if (current.length >= maxTargets) return current;
+        if (current.length >= effectiveMaxTargets) return current;
 
         const id = targetIdCounter.current++;
         // Keep within 15% to 85% so targets don't clip outside arena bounds
@@ -157,21 +255,44 @@ export const SoloGame: React.FC<SoloGameProps> = ({
 
         const rand = Math.random();
         let type: PulseTarget['type'] = 'standard';
-        let color = '#38bdf8'; // neon cyan
+        let color = standardColor;
+        let points = 200;
+        let hitsRemaining = 1;
 
-        if (rand < hazardChance) {
+        if (rand < effectiveHazardChance) {
           type = 'hazard'; // Red danger
           color = '#ef4444';
-        } else if (rand < hazardChance + 0.08) {
+        } else if (rand < effectiveHazardChance + 0.08) {
           type = 'golden'; // Fever Surge
           color = '#f59e0b';
-        } else if (rand < hazardChance + 0.14) {
+          points = 500;
+        } else if (rand < effectiveHazardChance + 0.14) {
+          type = 'multi'; // Double Tap
+          color = '#ec4899';
+          points = 400;
+          hitsRemaining = 2;
+        } else if (rand < effectiveHazardChance + 0.20) {
+          type = 'vortex'; // Shockwave Bomb
+          color = '#8b5cf6';
+          points = 300;
+        } else if (rand < effectiveHazardChance + 0.26) {
           type = 'freeze'; // Slow-mo
           color = '#06b6d4';
-        } else if (rand < hazardChance + 0.20) {
+          points = 250;
+        } else if (rand < effectiveHazardChance + 0.32) {
           type = 'surge'; // Shield
-          color = '#a855f7';
+          color = '#c084fc';
+          points = 250;
+        } else if (rand < effectiveHazardChance + 0.38) {
+          type = 'phantom'; // Quantum Mirage
+          color = '#22d3ee';
+          points = 350;
         }
+
+        // Collapse duration dynamically tightens as difficulty increases
+        const targetDuration = slowMoActive
+          ? duration
+          : Math.max(360, Math.round(duration / Math.pow(dynamicDifficultyRef.current, 0.65)));
 
         return [
           ...current,
@@ -181,17 +302,19 @@ export const SoloGame: React.FC<SoloGameProps> = ({
             y,
             radius: 36,
             spawnTime: Date.now(),
-            duration,
-            points: type === 'golden' ? 500 : 200,
+            duration: targetDuration,
+            points,
             type,
             color,
+            hitsRemaining,
+            maxHits: hitsRemaining,
           },
         ];
       });
     }, intervalTime);
 
     return () => clearInterval(spawner);
-  }, [gameState, score, slowMoActive, speedMode]);
+  }, [gameState, score, slowMoActive, speedMode, skin, Math.round(dynamicDifficulty * 10) / 10]);
 
   // Expiration check loop
   useEffect(() => {
@@ -219,6 +342,19 @@ export const SoloGame: React.FC<SoloGameProps> = ({
 
     return () => clearInterval(cleanup);
   }, [gameState, hasShield]);
+
+  const spawnShockwave = (x: number, y: number, color: string) => {
+    const item: Shockwave = {
+      id: Date.now() + Math.random(),
+      x,
+      y,
+      color,
+    };
+    setShockwaves(prev => [...prev.slice(-5), item]);
+    setTimeout(() => {
+      setShockwaves(prev => prev.filter(s => s.id !== item.id));
+    }, 480);
+  };
 
   const spawnParticles = (xPct: number, yPct: number, color: string) => {
     const newParticles: HitParticle[] = [];
@@ -260,7 +396,7 @@ export const SoloGame: React.FC<SoloGameProps> = ({
   const handleTargetMiss = useCallback((target?: PulseTarget) => {
     if (hasShield) {
       setHasShield(false);
-      soundEngine.playTap('GOOD');
+      soundEngine.playShieldBlock();
       triggerHaptic('tap');
       spawnFloatingScore(target?.x ?? 50, target?.y ?? 40, 'SHIELD BROKEN', 'text-purple-400');
       return;
@@ -284,8 +420,12 @@ export const SoloGame: React.FC<SoloGameProps> = ({
     soundEngine.playMiss();
     triggerHaptic('error');
     setCombo(0);
+    setFeverEnergy(prev => Math.max(0, prev - 15)); // Penalize fever energy on miss
     setMissCount(m => m + 1);
     spawnFloatingScore(target?.x ?? 50, target?.y ?? 35, t.miss, 'text-rose-500');
+
+    // Dynamic difficulty relaxation on miss
+    updateDynamicDifficulty('MISS', 0);
 
     setLives(prevLives => {
       const next = prevLives - 1;
@@ -310,14 +450,28 @@ export const SoloGame: React.FC<SoloGameProps> = ({
     const elapsed = now - target.spawnTime;
     const progress = elapsed / target.duration; // 0 (start) to 1 (expired)
 
-    // Calculate reaction time
+    // Calculate reaction time benchmark
     setReactionTimes(prev => [...prev, elapsed]);
+    setLatestReactionMs(elapsed);
+    setFastestReactionMs(cur => cur ? Math.min(cur, elapsed) : elapsed);
+
+    // Multi-Hit Check: Needs 2 taps
+    if (target.type === 'multi' && target.hitsRemaining && target.hitsRemaining > 1) {
+      soundEngine.playMultiTapCrack(1);
+      triggerHaptic('tap');
+      spawnParticles(target.x, target.y, '#ec4899');
+      spawnShockwave(target.x, target.y, '#ec4899');
+      spawnFloatingScore(target.x, target.y, '1 HIT LEFT!', 'text-pink-400');
+      setTargets(cur => cur.map(t => t.id === target.id ? { ...t, hitsRemaining: (t.hitsRemaining || 2) - 1 } : t));
+      return;
+    }
 
     // Mark as tapped immediately to prevent double hits
     setTargets(cur => cur.filter(t => t.id !== target.id));
 
-    // Spawn sparks
+    // Spawn sparks & shockwave
     spawnParticles(target.x, target.y, target.color);
+    spawnShockwave(target.x, target.y, target.color);
 
     // Handle Hazard
     if (target.type === 'hazard') {
@@ -335,12 +489,23 @@ export const SoloGame: React.FC<SoloGameProps> = ({
         color: '#ef4444',
       });
 
+      if (hasShield) {
+        setHasShield(false);
+        soundEngine.playShieldBlock();
+        spawnFloatingScore(target.x, target.y, 'SHIELD DEFLECTED HAZARD!', 'text-purple-400');
+        return;
+      }
+
       soundEngine.playMiss();
       triggerHaptic('heavy');
       setCombo(0);
+      setFeverEnergy(0);
       setScore(s => Math.max(0, s - 200));
       setMissCount(m => m + 1);
       spawnFloatingScore(target.x, target.y, 'HAZARD HIT!', 'text-red-500', '-200');
+
+      // Hazard penalty on dynamic difficulty
+      updateDynamicDifficulty('MISS', 0);
 
       setLives(l => {
         const next = l - 1;
@@ -350,11 +515,27 @@ export const SoloGame: React.FC<SoloGameProps> = ({
       return;
     }
 
+    // Vortex Bomb: Clear screen
+    if (target.type === 'vortex') {
+      soundEngine.playVortexBlast();
+      triggerHaptic('heavy');
+      spawnShockwave(target.x, target.y, '#8b5cf6');
+      setTargets(cur => {
+        const targetsToClear = cur.filter(t => t.id !== target.id && t.type !== 'hazard');
+        const bonus = targetsToClear.length * 150;
+        if (bonus > 0) {
+          setScore(s => s + bonus);
+          spawnFloatingScore(target.x, target.y - 6, `VORTEX BLAST +${bonus}!`, 'text-purple-300');
+        }
+        return cur.filter(t => t.type === 'hazard');
+      });
+    }
+
     // Power-ups
     if (target.type === 'golden') {
       setFeverActive(true);
-      setFeverTimer(6);
-      soundEngine.playPowerUp();
+      setFeverTimer(7);
+      soundEngine.playFeverIgnite();
       triggerHaptic('success');
       spawnFloatingScore(target.x, target.y, 'FEVER 3X!', 'text-amber-400', '+500');
     } else if (target.type === 'freeze') {
@@ -362,38 +543,78 @@ export const SoloGame: React.FC<SoloGameProps> = ({
       setTimeout(() => setSlowMoActive(false), 4500);
       soundEngine.playPowerUp();
       triggerHaptic('tap');
-      spawnFloatingScore(target.x, target.y, 'SLOW-MO ACTIVE', 'text-cyan-400', '+200');
+      spawnFloatingScore(target.x, target.y, 'SLOW-MO ACTIVE', 'text-cyan-400', '+250');
     } else if (target.type === 'surge') {
       setHasShield(true);
       soundEngine.playPowerUp();
       triggerHaptic('tap');
-      spawnFloatingScore(target.x, target.y, 'SHIELD CHARGED!', 'text-purple-400', '+200');
+      spawnFloatingScore(target.x, target.y, 'SHIELD CHARGED!', 'text-purple-400', '+250');
+    } else if (target.type === 'phantom') {
+      soundEngine.playPowerUp();
+      triggerHaptic('tap');
+      spawnFloatingScore(target.x, target.y, 'QUANTUM MIRAGE!', 'text-cyan-300', '+350');
     }
 
-    // Timing precision: optimal hit window is when the collapsing ring meets the center circle (approx 70-85% collapsed)
+    // Ultra-Fast Reaction Time Feedback
+    if (elapsed < 165) {
+      soundEngine.playReactionGodlike();
+    }
+
+    // Dynamic Timing Windows:
+    // As dynamic difficulty increases (1.0x -> 1.95x), timing precision thresholds tighten in real time!
+    // Baseline: PERFECT is < 0.100, GREAT is < 0.200.
+    // In OVERLOAD (1.8x+): PERFECT shrinks to ~0.060, GREAT shrinks to ~0.135.
+    // In RECOVER (< 1.0x): PERFECT expands slightly to ~0.115 to provide recovery forgiveness.
+    const currentDiff = dynamicDifficultyRef.current;
+    const currentPerfectTolerance = Math.max(0.048, 0.10 / Math.pow(currentDiff, 0.75));
+    const currentGreatTolerance = Math.max(0.095, 0.20 / Math.pow(currentDiff, 0.65));
+
     const accuracyDelta = Math.abs(progress - 0.76);
     let hitGrade: 'PERFECT' | 'GREAT' | 'GOOD' = 'GOOD';
     let addedPoints = target.points;
 
-    if (accuracyDelta < 0.10) {
+    // High dynamic intensity rewards greater score multipliers!
+    const difficultyScoreBonus = Math.max(0.9, 1 + (currentDiff - 1) * 0.45);
+
+    if (accuracyDelta < currentPerfectTolerance) {
       hitGrade = 'PERFECT';
-      addedPoints = Math.round(target.points * 1.5);
+      addedPoints = Math.round(target.points * 1.5 * difficultyScoreBonus);
       setPerfectCount(p => p + 1);
       soundEngine.playTap('PERFECT', combo + 1);
       triggerHaptic('tap');
-      spawnFloatingScore(target.x, target.y, t.perfect, 'text-emerald-400', `+${addedPoints}`);
-    } else if (accuracyDelta < 0.20) {
+      const label = currentDiff >= 1.5 ? 'CRITICAL PERFECT!' : t.perfect;
+      spawnFloatingScore(target.x, target.y, label, 'text-emerald-400', `+${addedPoints} • ${elapsed}ms`);
+    } else if (accuracyDelta < currentGreatTolerance) {
       hitGrade = 'GREAT';
-      addedPoints = Math.round(target.points * 1.2);
+      addedPoints = Math.round(target.points * 1.2 * difficultyScoreBonus);
       setGreatCount(g => g + 1);
       soundEngine.playTap('GREAT', combo + 1);
       triggerHaptic('tap');
-      spawnFloatingScore(target.x, target.y, t.great, 'text-cyan-300', `+${addedPoints}`);
+      spawnFloatingScore(target.x, target.y, t.great, 'text-cyan-300', `+${addedPoints} • ${elapsed}ms`);
     } else {
       soundEngine.playTap('GOOD', combo + 1);
       triggerHaptic('tap');
-      spawnFloatingScore(target.x, target.y, 'GOOD', 'text-blue-300', `+${addedPoints}`);
+      addedPoints = Math.round(target.points * difficultyScoreBonus);
+      spawnFloatingScore(target.x, target.y, 'GOOD', 'text-blue-300', `+${addedPoints} • ${elapsed}ms`);
     }
+
+    // Dynamic difficulty adjustment based on outcome and streak
+    updateDynamicDifficulty(hitGrade, combo + 1);
+
+    // Fever Supercharge Gauge increase
+    setFeverEnergy(prev => {
+      const gain = hitGrade === 'PERFECT' ? 14 : target.type === 'multi' ? 20 : 8;
+      const next = prev + gain;
+      if (next >= 100 && !feverActive) {
+        setFeverActive(true);
+        setFeverTimer(7);
+        soundEngine.playFeverIgnite();
+        triggerHaptic('success');
+        spawnFloatingScore(50, 25, '⚡ SUPERCHARGE FEVER!', 'text-amber-300');
+        return 0;
+      }
+      return Math.min(100, next);
+    });
 
     const currentMultiplier = feverActive ? 3 : Math.min(4, 1 + Math.floor(combo / 8));
     const speedBonus = speedMode === 'overdrive' ? 1.5 : 1;
@@ -418,6 +639,12 @@ export const SoloGame: React.FC<SoloGameProps> = ({
     setCombo(c => {
       const next = c + 1;
       setMaxCombo(mc => Math.max(mc, next));
+
+      // Combo milestone fanfare
+      if ([5, 10, 20, 30, 50, 75, 100].includes(next)) {
+        soundEngine.playComboMilestone(next);
+        spawnFloatingScore(target.x, target.y - 8, `🔥 ${next}X STREAK!`, 'text-amber-400');
+      }
       return next;
     });
   };
@@ -460,6 +687,7 @@ export const SoloGame: React.FC<SoloGameProps> = ({
     if (combo > 0) {
       setCombo(0);
       spawnFloatingScore(50, 40, 'COMBO BREAK', 'text-slate-400');
+      updateDynamicDifficulty('MISS', 0);
     }
     soundEngine.playEmptyTap();
   };
@@ -498,6 +726,7 @@ export const SoloGame: React.FC<SoloGameProps> = ({
       perfectHits: perfectCount,
       greatHits: greatCount,
       misses: missCount,
+      peakDynamicDifficulty,
       durationSeconds,
       date: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       timestamp: Date.now(),
@@ -524,81 +753,160 @@ export const SoloGame: React.FC<SoloGameProps> = ({
       }`}
     >
       {/* HUD Header */}
-      <div className={`flex items-center justify-between px-3 py-2 border-b backdrop-blur-md z-20 transition-colors ${
+      <div className={`flex flex-col border-b backdrop-blur-md z-20 transition-colors ${
         feverActive 
           ? 'bg-amber-950/40 border-amber-500/40 shadow-[0_0_15px_rgba(245,158,11,0.2)]'
           : isDark ? 'bg-slate-900/80 border-slate-800' : 'bg-white/80 border-slate-200 shadow-sm'
       }`}>
-        {/* Lives & Shield */}
-        <div className="flex items-center gap-1.5">
-          <div className="flex items-center gap-0.5">
-            {[...Array(3)].map((_, i) => (
-              <Heart
-                key={i}
-                className={`w-4 h-4 transition-transform duration-200 ${
-                  i < lives ? 'text-rose-500 fill-rose-500 scale-100' : 'text-slate-600 scale-75'
-                }`}
-              />
-            ))}
-          </div>
-          {hasShield && (
-            <span className="flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-400 border border-purple-500/40 text-[10px] font-bold">
-              <Shield className="w-3 h-3" />
-            </span>
-          )}
-        </div>
-
-        {/* Score and Combo Center */}
-        <div className="text-center">
-          <div className="font-extrabold text-xl tracking-tight font-mono text-cyan-400">
-            {score.toLocaleString()}
-          </div>
-          <div className="text-[10px] font-bold uppercase tracking-wider flex items-center justify-center gap-1.5">
-            {combo > 3 && (
-              <span className="flex items-center text-amber-400 animate-pulse font-mono">
-                <Flame className="w-3.5 h-3.5 fill-amber-400" /> {combo}x COMBO
-              </span>
-            )}
-            {feverActive && (
-              <span className="px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-400 font-extrabold text-[9px] border border-amber-500/30">
-                FEVER 3X ({feverTimer}s)
+        <div className="flex items-center justify-between px-3 py-2">
+          {/* Lives & Shield */}
+          <div className="flex items-center gap-1.5">
+            <div className="flex items-center gap-0.5">
+              {[...Array(3)].map((_, i) => (
+                <Heart
+                  key={i}
+                  className={`w-4 h-4 transition-transform duration-200 ${
+                    i < lives ? 'text-rose-500 fill-rose-500 scale-100' : 'text-slate-600 scale-75'
+                  }`}
+                />
+              ))}
+            </div>
+            {hasShield && (
+              <span className="flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-400 border border-purple-500/40 text-[10px] font-bold">
+                <Shield className="w-3 h-3" />
               </span>
             )}
           </div>
+
+          {/* Score and Combo Center */}
+          <div className="text-center">
+            <div className="font-extrabold text-xl tracking-tight font-mono text-cyan-400">
+              {score.toLocaleString()}
+            </div>
+            <div className="text-[10px] font-bold uppercase tracking-wider flex items-center justify-center gap-1.5">
+              {combo > 3 && (
+                <span className="flex items-center text-amber-400 animate-pulse font-mono">
+                  <Flame className="w-3.5 h-3.5 fill-amber-400" /> {combo}x COMBO
+                </span>
+              )}
+              {feverActive ? (
+                <span className="px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-400 font-extrabold text-[9px] border border-amber-500/30">
+                  FEVER 3X ({feverTimer}s)
+                </span>
+              ) : latestReactionMs ? (
+                <span className={`font-mono text-[9px] font-bold ${
+                  latestReactionMs < 170 ? 'text-emerald-400' : latestReactionMs < 240 ? 'text-cyan-400' : 'text-slate-400'
+                }`}>
+                  ⚡ {latestReactionMs}ms
+                </span>
+              ) : null}
+            </div>
+          </div>
+
+          {/* Speed Mode Pill & Controls */}
+          <div className="flex items-center gap-1">
+            {/* Target Skin Cycle */}
+            <button
+              id="solo-skin-toggle"
+              onClick={() => {
+                soundEngine.playTap();
+                triggerHaptic('tap');
+                setSkin(prev => {
+                  const next = prev === 'cyber' ? 'synthwave' : prev === 'synthwave' ? 'emerald' : prev === 'emerald' ? 'hyper' : 'cyber';
+                  return next;
+                });
+              }}
+              title="Change Target Skin Theme"
+              className="p-1.5 rounded-xl border border-slate-700/60 bg-slate-800/80 text-slate-300 active:scale-95 transition"
+            >
+              <Palette className="w-3.5 h-3.5" />
+            </button>
+
+            {/* Speed Mode Toggle */}
+            <button
+              id="solo-speed-mode-toggle"
+              onClick={cycleSpeedMode}
+              title="Switch Reflex Pacing: Turbo, Overdrive, Standard"
+              className={`px-2 py-1 rounded-xl text-[10px] font-black tracking-wider uppercase border flex items-center gap-1 active:scale-95 transition ${
+                speedMode === 'overdrive'
+                  ? 'bg-rose-500/20 text-rose-300 border-rose-500/50 shadow-sm shadow-rose-500/20 animate-pulse'
+                  : speedMode === 'turbo'
+                  ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40'
+                  : 'bg-slate-800 text-slate-400 border-slate-700'
+              }`}
+            >
+              {speedMode === 'overdrive' ? '🔥 OVERDRIVE' : speedMode === 'turbo' ? '⚡ TURBO' : '⏱️ NORMAL'}
+            </button>
+
+            <button
+              id="solo-pause-btn"
+              onClick={() => setGameState(gameState === 'playing' ? 'paused' : 'playing')}
+              className={`p-1.5 rounded-xl transition active:scale-95 ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-700'}`}
+            >
+              {gameState === 'playing' ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
+            </button>
+            <button
+              id="solo-exit-btn"
+              onClick={onBackToMenu}
+              className={`p-1.5 rounded-xl transition active:scale-95 ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-700'}`}
+            >
+              <ArrowLeft className="w-4 h-4" />
+            </button>
+          </div>
         </div>
 
-        {/* Speed Mode Pill & Controls */}
-        <div className="flex items-center gap-1">
-          {/* Speed Mode Toggle */}
-          <button
-            id="solo-speed-mode-toggle"
-            onClick={cycleSpeedMode}
-            title="Switch Reflex Pacing: Turbo, Overdrive, Standard"
-            className={`px-2 py-1 rounded-xl text-[10px] font-black tracking-wider uppercase border flex items-center gap-1 active:scale-95 transition ${
-              speedMode === 'overdrive'
-                ? 'bg-rose-500/20 text-rose-300 border-rose-500/50 shadow-sm shadow-rose-500/20 animate-pulse'
-                : speedMode === 'turbo'
-                ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40'
-                : 'bg-slate-800 text-slate-400 border-slate-700'
+        {/* Supercharge Fever Energy Bar */}
+        <div className="w-full h-1 bg-slate-800/80 overflow-hidden relative">
+          <div
+            className={`h-full transition-all duration-200 ${
+              feverActive
+                ? 'bg-gradient-to-r from-amber-400 via-rose-500 to-amber-300 animate-pulse w-full'
+                : 'bg-gradient-to-r from-cyan-500 to-amber-400'
             }`}
-          >
-            {speedMode === 'overdrive' ? '🔥 OVERDRIVE' : speedMode === 'turbo' ? '⚡ TURBO' : '⏱️ NORMAL'}
-          </button>
+            style={{ width: feverActive ? '100%' : `${feverEnergy}%` }}
+          />
+        </div>
 
-          <button
-            id="solo-pause-btn"
-            onClick={() => setGameState(gameState === 'playing' ? 'paused' : 'playing')}
-            className={`p-1.5 rounded-xl transition active:scale-95 ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-700'}`}
-          >
-            {gameState === 'playing' ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
-          </button>
-          <button
-            id="solo-exit-btn"
-            onClick={onBackToMenu}
-            className={`p-1.5 rounded-xl transition active:scale-95 ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-700'}`}
-          >
-            <ArrowLeft className="w-4 h-4" />
-          </button>
+        {/* Dynamic Adaptive Pace HUD Bar */}
+        <div className={`px-3 py-1 flex items-center justify-between border-t text-[10px] font-mono transition-colors ${
+          difficultyTier === 'OVERLOAD'
+            ? 'bg-purple-950/60 border-purple-500/40 text-purple-200'
+            : difficultyTier === 'HYPER'
+            ? 'bg-rose-950/50 border-rose-500/30 text-rose-200'
+            : difficultyTier === 'SURGE'
+            ? 'bg-amber-950/40 border-amber-500/30 text-amber-200'
+            : difficultyTier === 'RECOVER'
+            ? 'bg-emerald-950/40 border-emerald-500/30 text-emerald-200'
+            : isDark ? 'bg-slate-900/60 border-slate-800 text-slate-300' : 'bg-slate-100 border-slate-200 text-slate-700'
+        }`}>
+          {/* Left: Dynamic Intensity Multiplier & Tier */}
+          <div className="flex items-center gap-1.5">
+            <span className="text-[9px] uppercase font-bold tracking-wider opacity-70">Pace:</span>
+            <span className={`px-1.5 py-0.5 rounded text-[9px] font-black tracking-wider uppercase border flex items-center gap-1 ${
+              difficultyTier === 'OVERLOAD'
+                ? 'bg-purple-500/30 text-purple-300 border-purple-400/60 shadow-[0_0_8px_rgba(168,85,247,0.4)] animate-pulse'
+                : difficultyTier === 'HYPER'
+                ? 'bg-rose-500/30 text-rose-300 border-rose-400/60 shadow-[0_0_8px_rgba(244,63,94,0.3)]'
+                : difficultyTier === 'SURGE'
+                ? 'bg-amber-500/20 text-amber-300 border-amber-400/40'
+                : difficultyTier === 'RECOVER'
+                ? 'bg-emerald-500/20 text-emerald-300 border-emerald-400/40'
+                : 'bg-cyan-500/20 text-cyan-300 border-cyan-400/40'
+            }`}>
+              {difficultyTier === 'OVERLOAD' ? '⚡ OVERLOAD' : difficultyTier === 'HYPER' ? '🔥 HYPER' : difficultyTier === 'SURGE' ? '⚡ SURGE' : difficultyTier === 'RECOVER' ? '🛡️ RECOVER' : '⏱️ STEADY'} {dynamicDifficulty.toFixed(2)}x
+            </span>
+          </div>
+
+          {/* Right: Rolling Accuracy & Narrowed Timing Tolerance Window */}
+          <div className="flex items-center gap-2 text-[9px]">
+            <span title="Rolling Accuracy based on recent targets">
+              Acc: <strong className={recentAccuracyPct >= 85 ? 'text-emerald-400 font-bold' : recentAccuracyPct >= 65 ? 'text-cyan-400 font-bold' : 'text-amber-400 font-bold'}>{recentAccuracyPct}%</strong>
+            </span>
+            <span className="opacity-40">•</span>
+            <span title="Dynamic Perfect Window (shrinks with difficulty)">
+              Window: <strong className="font-mono text-slate-200">±{Math.round(perfectTolerance * 1000) / 10}%</strong>
+            </span>
+          </div>
         </div>
       </div>
 
@@ -608,7 +916,7 @@ export const SoloGame: React.FC<SoloGameProps> = ({
         id="touch-game-arena"
         onPointerDown={handleArenaTap}
         className={`relative flex-1 w-full overflow-hidden select-none touch-none cursor-crosshair transition-all duration-300 ${
-          feverActive ? 'anim-fever-aura' : combo >= 6 ? 'anim-combo-aura' : ''
+          feverActive ? 'anim-fever-aura' : difficultyTier === 'OVERLOAD' ? 'anim-overload-aura' : combo >= 6 ? 'anim-combo-aura' : ''
         } ${
           isDark
             ? 'bg-radial from-slate-900 via-slate-950 to-slate-950'
@@ -626,6 +934,22 @@ export const SoloGame: React.FC<SoloGameProps> = ({
             </span>
           </div>
         )}
+
+        {/* Shockwave Rings on Tap & Explosions */}
+        {shockwaves.map(sw => (
+          <div
+            key={sw.id}
+            className="anim-shockwave"
+            style={{
+              left: `${sw.x}%`,
+              top: `${sw.y}%`,
+              width: '80px',
+              height: '80px',
+              borderColor: sw.color,
+              boxShadow: `0 0 16px ${sw.color}`,
+            }}
+          />
+        ))}
 
         {/* Particle Sparks Burst */}
         {particles.map(p => (
@@ -668,13 +992,8 @@ export const SoloGame: React.FC<SoloGameProps> = ({
           </div>
         ))}
 
-        {/* Active Pulse Spheres with GPU-accelerated Collapsing Rings */}
+        {/* Active Pulse Targets with TargetGlyph Icons & Collapsing Timing Rings */}
         {targets.map(target => {
-          const isHazard = target.type === 'hazard';
-          const isGolden = target.type === 'golden';
-          const isFreeze = target.type === 'freeze';
-          const isSurge = target.type === 'surge';
-
           return (
             <div
               key={target.id}
@@ -684,46 +1003,45 @@ export const SoloGame: React.FC<SoloGameProps> = ({
                 top: `${target.y}%`,
               }}
               onPointerDown={(e) => handleTargetTap(target, e)}
-              className="absolute -translate-x-1/2 -translate-y-1/2 w-22 h-22 flex items-center justify-center cursor-pointer select-none touch-none active:scale-95 transition-transform"
+              className={`absolute -translate-x-1/2 -translate-y-1/2 w-24 h-24 flex items-center justify-center cursor-pointer select-none touch-none active:scale-95 transition-transform ${
+                target.type === 'phantom' ? 'animate-pulse' : ''
+              }`}
             >
               {/* Outer Collapsing Ring (Exact Timing Cue) */}
               <div
                 style={{
                   animationDuration: `${target.duration}ms`,
                   borderColor: target.color,
-                  boxShadow: `0 0 10px ${target.color}88`,
+                  boxShadow: `0 0 12px ${target.color}99`,
                 }}
                 className="absolute inset-0 rounded-full border-2 anim-collapse-ring pointer-events-none"
               />
 
-              {/* Target Boundary Guide */}
+              {/* Target Rotating Precision Reticle */}
               <div
                 style={{
-                  animationDuration: '8s',
-                  borderColor: `${target.color}66`,
+                  animationDuration: '6s',
+                  borderColor: `${target.color}55`,
                 }}
-                className="absolute inset-2 rounded-full border border-dashed opacity-70 pointer-events-none animate-spin"
+                className="absolute inset-2 rounded-full border border-dashed opacity-80 pointer-events-none animate-spin"
               />
 
-              {/* Core Touch Sphere */}
-              <div
-                style={{
-                  backgroundColor: isHazard ? '#ef4444' : isGolden ? '#f59e0b' : isFreeze ? '#06b6d4' : isSurge ? '#8b5cf6' : '#0284c7',
-                  boxShadow: `0 0 18px ${target.color}`,
-                }}
-                className="w-12 h-12 rounded-full flex items-center justify-center font-black text-slate-950 text-xs shadow-lg transition-transform pointer-events-none"
-              >
-                {isHazard ? (
-                  <Zap className="w-5 h-5 text-white fill-white animate-bounce" />
-                ) : isGolden ? (
-                  <Flame className="w-5 h-5 text-slate-950 fill-slate-950" />
-                ) : isFreeze ? (
-                  <span className="text-white font-mono text-[10px] font-bold">SLO</span>
-                ) : isSurge ? (
-                  <Shield className="w-5 h-5 text-white fill-white" />
-                ) : (
-                  <span className="text-white font-mono font-extrabold text-xs">PULSE</span>
-                )}
+              {/* Multi-hit outer count badge */}
+              {target.type === 'multi' && (
+                <div className="absolute -top-1 -right-1 z-10 px-1.5 py-0.5 rounded-full bg-pink-500 text-white font-mono font-black text-[10px] border border-white shadow-lg animate-bounce">
+                  {target.hitsRemaining}x
+                </div>
+              )}
+
+              {/* Target Custom SVG Glyph Icon */}
+              <div className="pointer-events-none transition-transform">
+                <TargetGlyph
+                  type={target.type}
+                  color={target.color}
+                  size={target.type === 'vortex' ? 52 : 46}
+                  hitsRemaining={target.hitsRemaining}
+                  maxHits={target.maxHits}
+                />
               </div>
             </div>
           );
@@ -731,7 +1049,7 @@ export const SoloGame: React.FC<SoloGameProps> = ({
 
         {/* Countdown Overlay */}
         {gameState === 'countdown' && (
-          <div className="absolute inset-0 bg-black/75 backdrop-blur-sm flex flex-col items-center justify-center z-30 p-4">
+          <div className="absolute inset-0 bg-black/80 backdrop-blur-sm flex flex-col items-center justify-center z-30 p-4">
             <div className="text-7xl font-black text-cyan-400 font-mono animate-bounce">
               {countdown > 0 ? countdown : 'GO!'}
             </div>
@@ -790,6 +1108,38 @@ export const SoloGame: React.FC<SoloGameProps> = ({
                 >
                   ⏱️ Normal
                 </button>
+              </div>
+            </div>
+
+            {/* Target Skin Palette Selector in Countdown */}
+            <div className="mt-4 flex flex-col items-center gap-1.5">
+              <span className="text-[10px] font-mono text-slate-400 uppercase tracking-widest">
+                Visual Reticle Skin:
+              </span>
+              <div className="flex items-center gap-2 bg-slate-900/90 px-3 py-1.5 rounded-xl border border-slate-800">
+                {(['cyber', 'synthwave', 'emerald', 'hyper'] as const).map(s => (
+                  <button
+                    key={s}
+                    id={`skin-select-${s}`}
+                    onClick={() => {
+                      setSkin(s);
+                      soundEngine.playTap();
+                    }}
+                    className={`px-2.5 py-1 rounded-lg text-[10px] font-extrabold uppercase transition ${
+                      skin === s
+                        ? s === 'cyber'
+                          ? 'bg-cyan-500 text-slate-950'
+                          : s === 'synthwave'
+                          ? 'bg-rose-500 text-white'
+                          : s === 'emerald'
+                          ? 'bg-emerald-500 text-slate-950'
+                          : 'bg-purple-500 text-white'
+                        : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    {s}
+                  </button>
+                ))}
               </div>
             </div>
           </div>
@@ -863,16 +1213,32 @@ export const SoloGame: React.FC<SoloGameProps> = ({
                   </span>
                 </div>
                 <div className="p-2.5 rounded-xl bg-slate-800/60 border border-slate-700/50">
+                  <span className="text-[10px] text-slate-400 uppercase font-bold block">Peak Dynamic Pace</span>
+                  <span className={`text-base font-mono font-bold ${
+                    peakDynamicDifficulty >= 1.75
+                      ? 'text-purple-400'
+                      : peakDynamicDifficulty >= 1.45
+                      ? 'text-rose-400'
+                      : peakDynamicDifficulty >= 1.20
+                      ? 'text-amber-400'
+                      : 'text-cyan-400'
+                  }`}>
+                    {peakDynamicDifficulty.toFixed(2)}x <span className="text-[9px] font-sans font-bold">({getDifficultyTier(peakDynamicDifficulty)})</span>
+                  </span>
+                </div>
+                <div className="p-2.5 rounded-xl bg-slate-800/60 border border-slate-700/50">
                   <span className="text-[10px] text-slate-400 uppercase font-bold block">Perfect Taps</span>
                   <span className="text-base font-mono font-bold text-cyan-300">{perfectCount}</span>
                 </div>
-                <div className="p-2.5 rounded-xl bg-slate-800/60 border border-slate-700/50">
-                  <span className="text-[10px] text-slate-400 uppercase font-bold block">{t.avg_reaction}</span>
-                  <span className="text-base font-mono font-bold text-purple-300">
-                    {reactionTimes.length > 0 
-                      ? Math.round(reactionTimes.reduce((a, b) => a + b, 0) / reactionTimes.length) 
-                      : 210} ms
-                  </span>
+                <div className="p-2.5 rounded-xl bg-slate-800/60 border border-slate-700/50 col-span-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] text-slate-400 uppercase font-bold">{t.avg_reaction}</span>
+                    <span className="text-base font-mono font-bold text-purple-300">
+                      {reactionTimes.length > 0 
+                        ? Math.round(reactionTimes.reduce((a, b) => a + b, 0) / reactionTimes.length) 
+                        : 210} ms
+                    </span>
+                  </div>
                 </div>
               </div>
 
@@ -891,6 +1257,12 @@ export const SoloGame: React.FC<SoloGameProps> = ({
                     setReactionTimes([]);
                     setFloatingScores([]);
                     setParticles([]);
+                    setDynamicDifficulty(1.0);
+                    setPeakDynamicDifficulty(1.0);
+                    setRecentAccuracyPct(100);
+                    recentOutcomesRef.current = [];
+                    dynamicDifficultyRef.current = 1.0;
+                    lastTierRef.current = 'STEADY';
                     setCountdown(3);
                     setGameState('countdown');
                   }}

@@ -377,6 +377,227 @@ class SoundEngine {
       });
     } catch (e) {}
   }
+
+  // Combo milestone fanfare (5x, 10x, 20x, 30x, 50x)
+  public playComboMilestone(milestone: number) {
+    if (!this.soundEnabled) return;
+    try {
+      const ctx = this.initContext();
+      if (!ctx) return;
+
+      const base = milestone >= 30 ? 659.25 : milestone >= 20 ? 587.33 : 440.0;
+      const chords = [base, base * 1.25, base * 1.5, base * 2.0];
+      const now = ctx.currentTime;
+
+      chords.forEach((freq, i) => {
+        if (!ctx) return;
+        const noteTime = now + i * 0.04;
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(freq, noteTime);
+        osc.frequency.exponentialRampToValueAtTime(freq * 1.05, noteTime + 0.12);
+
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+
+        gain.gain.setValueAtTime(0.0001, noteTime);
+        gain.gain.linearRampToValueAtTime(0.18, noteTime + 0.005);
+        gain.gain.exponentialRampToValueAtTime(0.0001, noteTime + 0.22);
+
+        osc.start(noteTime);
+        osc.stop(noteTime + 0.24);
+      });
+    } catch (e) {}
+  }
+
+  // Multi-tap crack/ping when hitting a multi-hit target
+  public playMultiTapCrack(hitsRemaining: number) {
+    if (!this.soundEnabled) return;
+    try {
+      const ctx = this.initContext();
+      if (!ctx) return;
+
+      const now = ctx.currentTime;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+
+      // Sharp metallic crack
+      osc.type = 'square';
+      osc.frequency.setValueAtTime(880 + (2 - hitsRemaining) * 440, now);
+      osc.frequency.exponentialRampToValueAtTime(320, now + 0.06);
+
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+
+      gain.gain.setValueAtTime(0.0001, now);
+      gain.gain.linearRampToValueAtTime(0.18, now + 0.002);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.07);
+
+      osc.start(now);
+      osc.stop(now + 0.08);
+    } catch (e) {}
+  }
+
+  // Vortex shockwave boom: clears multiple targets with bass explosion
+  public playVortexBlast() {
+    if (!this.soundEnabled) return;
+    try {
+      const ctx = this.initContext();
+      if (!ctx) return;
+
+      const now = ctx.currentTime;
+
+      // Sub bass boom
+      const subOsc = ctx.createOscillator();
+      const subGain = ctx.createGain();
+      subOsc.type = 'sine';
+      subOsc.frequency.setValueAtTime(140, now);
+      subOsc.frequency.exponentialRampToValueAtTime(35, now + 0.35);
+
+      subOsc.connect(subGain);
+      subGain.connect(ctx.destination);
+
+      subGain.gain.setValueAtTime(0.0001, now);
+      subGain.gain.linearRampToValueAtTime(0.32, now + 0.005);
+      subGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.4);
+
+      subOsc.start(now);
+      subOsc.stop(now + 0.42);
+
+      // Resonant laser sweep
+      const laserOsc = ctx.createOscillator();
+      const laserGain = ctx.createGain();
+      laserOsc.type = 'sawtooth';
+      laserOsc.frequency.setValueAtTime(1200, now);
+      laserOsc.frequency.exponentialRampToValueAtTime(160, now + 0.2);
+
+      laserOsc.connect(laserGain);
+      laserGain.connect(ctx.destination);
+
+      laserGain.gain.setValueAtTime(0.0001, now);
+      laserGain.gain.linearRampToValueAtTime(0.12, now + 0.003);
+      laserGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.22);
+
+      laserOsc.start(now);
+      laserOsc.stop(now + 0.24);
+    } catch (e) {}
+  }
+
+  // Fever Mode ignition burst
+  public playFeverIgnite() {
+    if (!this.soundEnabled) return;
+    try {
+      const ctx = this.initContext();
+      if (!ctx) return;
+
+      const now = ctx.currentTime;
+      const freqs = [329.63, 493.88, 659.25, 987.77, 1318.51];
+      freqs.forEach((freq, idx) => {
+        if (!ctx) return;
+        const noteTime = now + idx * 0.025;
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(freq, noteTime);
+        osc.frequency.exponentialRampToValueAtTime(freq * 1.4, noteTime + 0.2);
+
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+
+        gain.gain.setValueAtTime(0.0001, noteTime);
+        gain.gain.linearRampToValueAtTime(0.15, noteTime + 0.004);
+        gain.gain.exponentialRampToValueAtTime(0.0001, noteTime + 0.28);
+
+        osc.start(noteTime);
+        osc.stop(noteTime + 0.3);
+      });
+    } catch (e) {}
+  }
+
+  // Shield deflection / shatter
+  public playShieldBlock() {
+    if (!this.soundEnabled) return;
+    try {
+      const ctx = this.initContext();
+      if (!ctx) return;
+
+      const now = ctx.currentTime;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(880, now);
+      osc.frequency.exponentialRampToValueAtTime(1760, now + 0.04);
+      osc.frequency.exponentialRampToValueAtTime(440, now + 0.2);
+
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+
+      gain.gain.setValueAtTime(0.0001, now);
+      gain.gain.linearRampToValueAtTime(0.24, now + 0.003);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.25);
+
+      osc.start(now);
+      osc.stop(now + 0.26);
+    } catch (e) {}
+  }
+
+  // Godlike reaction time ping (<160ms)
+  public playReactionGodlike() {
+    if (!this.soundEnabled) return;
+    try {
+      const ctx = this.initContext();
+      if (!ctx) return;
+
+      const now = ctx.currentTime;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(1567.98, now); // G6 crystal tone
+      osc.frequency.exponentialRampToValueAtTime(2093.00, now + 0.08); // C7
+
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+
+      gain.gain.setValueAtTime(0.0001, now);
+      gain.gain.linearRampToValueAtTime(0.18, now + 0.002);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.18);
+
+      osc.start(now);
+      osc.stop(now + 0.19);
+    } catch (e) {}
+  }
+
+  // Danger hazard proximity warning
+  public playHazardWarning() {
+    if (!this.soundEnabled) return;
+    try {
+      const ctx = this.initContext();
+      if (!ctx) return;
+
+      const now = ctx.currentTime;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(220, now);
+      osc.frequency.setValueAtTime(180, now + 0.04);
+
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+
+      gain.gain.setValueAtTime(0.0001, now);
+      gain.gain.linearRampToValueAtTime(0.12, now + 0.002);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.09);
+
+      osc.start(now);
+      osc.stop(now + 0.1);
+    } catch (e) {}
+  }
 }
 
 export const soundEngine = new SoundEngine();

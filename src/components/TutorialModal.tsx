@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
-import { X, CheckCircle2, ChevronRight, ChevronLeft, Target, AlertTriangle, Sparkles, Swords } from 'lucide-react';
+import { X, CheckCircle2, ChevronRight, ChevronLeft, Target, AlertTriangle, Sparkles, Swords, Layers } from 'lucide-react';
 import { UserProfile } from '../types';
 import { translations } from '../i18n/translations';
 import { soundEngine } from '../services/audio';
+import { TargetGlyph } from './TargetGlyph';
 
 interface TutorialModalProps {
   profile: UserProfile;
@@ -32,6 +33,30 @@ export const TutorialModal: React.FC<TutorialModalProps> = ({
           <div className="absolute inset-2 rounded-full border border-dashed border-cyan-300 animate-spin" />
           <div className="w-14 h-14 rounded-full bg-cyan-500 shadow-[0_0_20px_#06b6d4] flex items-center justify-center font-black text-slate-950 text-xs">
             PERFECT!
+          </div>
+        </div>
+      ),
+    },
+    {
+      title: 'Target Arsenal & Glyphs',
+      desc: 'Crack Multi-taps by tapping twice, detonate Vortex bombs to clear all targets at once, and ignore fading Phantom mirages!',
+      icon: <Layers className="w-8 h-8 text-pink-400" />,
+      visual: (
+        <div className="grid grid-cols-3 gap-3 my-3 px-2">
+          <div className="flex flex-col items-center bg-slate-950/60 p-2 rounded-xl border border-slate-800">
+            <TargetGlyph type="multi" color="#f43f5e" size={36} hitsRemaining={2} maxHits={2} />
+            <span className="text-[10px] font-black text-pink-400 mt-1.5">MULTI-TAP</span>
+            <span className="text-[8px] text-slate-400">Tap 2x fast</span>
+          </div>
+          <div className="flex flex-col items-center bg-slate-950/60 p-2 rounded-xl border border-slate-800">
+            <TargetGlyph type="vortex" color="#a855f7" size={36} />
+            <span className="text-[10px] font-black text-purple-400 mt-1.5">VORTEX</span>
+            <span className="text-[8px] text-slate-400">Screen Wipe</span>
+          </div>
+          <div className="flex flex-col items-center bg-slate-950/60 p-2 rounded-xl border border-slate-800">
+            <TargetGlyph type="phantom" color="#94a3b8" size={36} />
+            <span className="text-[10px] font-black text-slate-400 mt-1.5">PHANTOM</span>
+            <span className="text-[8px] text-slate-400">Mirage fake</span>
           </div>
         </div>
       ),

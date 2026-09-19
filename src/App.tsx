@@ -291,14 +291,14 @@ export default function App() {
                   <div className="flex items-center gap-1.5 mb-1">
                     <Zap className="w-4 h-4 fill-slate-950" />
                     <span className="text-[11px] uppercase tracking-wider font-extrabold text-slate-950">
-                      High Velocity Solo
+                      ⚡ Turbo Reflex Pacing
                     </span>
                   </div>
                   <h3 className="text-xl font-black tracking-tight leading-none">
                     {t.play_solo}
                   </h3>
                   <p className="text-xs font-semibold text-slate-900/80 mt-1">
-                    Pulsing spheres, timing combos & power-ups
+                    Rapid-fire targets, tight timing windows & combo frenzy
                   </p>
                 </div>
 

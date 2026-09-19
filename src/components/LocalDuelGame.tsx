@@ -40,6 +40,7 @@ export const LocalDuelGame: React.FC<LocalDuelGameProps> = ({
   const [p2Score, setP2Score] = useState(0);
   const [p1Combo, setP1Combo] = useState(0);
   const [p2Combo, setP2Combo] = useState(0);
+  const [speedMode, setSpeedMode] = useState<'turbo' | 'overdrive' | 'standard'>('turbo');
 
   // Sabotage states (smoke/glitch on opponent's half)
   const [p1Sabotaged, setP1Sabotaged] = useState(false);
@@ -102,26 +103,45 @@ export const LocalDuelGame: React.FC<LocalDuelGameProps> = ({
     return () => clearInterval(timer);
   }, [gameState, p1Score, p2Score]);
 
-  // Spawner for both players
+  // Spawner for both players with fast-paced reflex scaling
   useEffect(() => {
     if (gameState !== 'playing') return;
 
+    let intervalTime = 350;
+    let maxTargetsPerPlayer = 4;
+    let baseDuration = Math.max(720, 1000 - Math.min((p1Score + p2Score) / 4, 280));
+    let sabotageChance = 0.18;
+    let goldenChance = 0.35;
+
+    if (speedMode === 'overdrive') {
+      intervalTime = 230;
+      maxTargetsPerPlayer = 5;
+      baseDuration = Math.max(480, 720 - Math.min((p1Score + p2Score) / 4, 240));
+      sabotageChance = 0.22;
+      goldenChance = 0.40;
+    } else if (speedMode === 'standard') {
+      intervalTime = 550;
+      maxTargetsPerPlayer = 3;
+      baseDuration = 1400;
+      sabotageChance = 0.15;
+      goldenChance = 0.30;
+    }
+
     const interval = setInterval(() => {
       setTargets(cur => {
-        // Keep max 3 targets per player
         const p1Targets = cur.filter(t => t.player === 1);
         const p2Targets = cur.filter(t => t.player === 2);
         const newTargets = [...cur];
 
-        if (p1Targets.length < 3) {
+        if (p1Targets.length < maxTargetsPerPlayer) {
           const rand = Math.random();
-          const type: DuelTarget['type'] = rand < 0.15 ? 'sabotage' : rand < 0.3 ? 'golden' : 'standard';
+          const type: DuelTarget['type'] = rand < sabotageChance ? 'sabotage' : rand < goldenChance ? 'golden' : 'standard';
           newTargets.push({
             id: targetCounter.current++,
             player: 1,
             x: Math.floor(15 + Math.random() * 70),
             y: Math.floor(20 + Math.random() * 60),
-            duration: 1600,
+            duration: baseDuration,
             spawnTime: Date.now(),
             color: type === 'sabotage' ? '#ec4899' : type === 'golden' ? '#f59e0b' : '#38bdf8',
             points: type === 'golden' ? 250 : 100,
@@ -129,15 +149,15 @@ export const LocalDuelGame: React.FC<LocalDuelGameProps> = ({
           });
         }
 
-        if (p2Targets.length < 3) {
+        if (p2Targets.length < maxTargetsPerPlayer) {
           const rand = Math.random();
-          const type: DuelTarget['type'] = rand < 0.15 ? 'sabotage' : rand < 0.3 ? 'golden' : 'standard';
+          const type: DuelTarget['type'] = rand < sabotageChance ? 'sabotage' : rand < goldenChance ? 'golden' : 'standard';
           newTargets.push({
             id: targetCounter.current++,
             player: 2,
             x: Math.floor(15 + Math.random() * 70),
             y: Math.floor(20 + Math.random() * 60),
-            duration: 1600,
+            duration: baseDuration,
             spawnTime: Date.now(),
             color: type === 'sabotage' ? '#ec4899' : type === 'golden' ? '#f59e0b' : '#f43f5e',
             points: type === 'golden' ? 250 : 100,
@@ -147,10 +167,10 @@ export const LocalDuelGame: React.FC<LocalDuelGameProps> = ({
 
         return newTargets;
       });
-    }, 650);
+    }, intervalTime);
 
     return () => clearInterval(interval);
-  }, [gameState]);
+  }, [gameState, p1Score, p2Score, speedMode]);
 
   // Expiration
   useEffect(() => {
@@ -444,11 +464,31 @@ export const LocalDuelGame: React.FC<LocalDuelGameProps> = ({
           <span className="text-xs font-mono font-bold text-cyan-400">{p1Score}</span>
         </div>
 
-        {/* Center Countdown / Timer */}
-        <div className="z-10 flex items-center gap-2 bg-slate-950/80 px-2.5 py-0.5 rounded-full border border-slate-700">
-          <span className="text-xs font-mono font-black text-amber-400">
-            ⏱️ {timeLeft}s
-          </span>
+        {/* Center Countdown / Timer & Speed Mode */}
+        <div className="z-10 flex items-center gap-1.5">
+          <button
+            id="duel-speed-mode-toggle"
+            onClick={() => {
+              soundEngine.playTap();
+              triggerHaptic('tap');
+              setSpeedMode(prev => (prev === 'turbo' ? 'overdrive' : prev === 'overdrive' ? 'standard' : 'turbo'));
+            }}
+            title="Toggle Duel Pacing"
+            className={`px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-wider border transition active:scale-95 ${
+              speedMode === 'overdrive'
+                ? 'bg-rose-500/30 text-rose-300 border-rose-500/60 animate-pulse'
+                : speedMode === 'turbo'
+                ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500/50'
+                : 'bg-slate-800 text-slate-400 border-slate-700'
+            }`}
+          >
+            {speedMode === 'overdrive' ? '🔥 OVERDRIVE' : speedMode === 'turbo' ? '⚡ TURBO' : '⏱️ NORMAL'}
+          </button>
+          <div className="bg-slate-950/80 px-2 py-0.5 rounded-full border border-slate-700">
+            <span className="text-xs font-mono font-black text-amber-400">
+              ⏱️ {timeLeft}s
+            </span>
+          </div>
         </div>
 
         <div className="flex items-center gap-1.5 z-10">
@@ -539,15 +579,69 @@ export const LocalDuelGame: React.FC<LocalDuelGameProps> = ({
       {/* Countdown Overlay */}
       {gameState === 'countdown' && (
         <div className="absolute inset-0 bg-black/75 backdrop-blur-md flex flex-col items-center justify-center z-40 p-6 text-center">
-          <p className="text-sm font-bold text-cyan-400 mb-2 uppercase tracking-wider">
+          <p className="text-sm font-bold text-cyan-400 mb-1 uppercase tracking-wider">
             {t.play_duel}
           </p>
-          <div className="text-7xl font-black text-amber-400 font-mono animate-bounce my-3">
+          <div className="text-7xl font-black text-amber-400 font-mono animate-bounce my-2">
             {countdown > 0 ? countdown : 'FIGHT!'}
           </div>
-          <p className="text-xs text-slate-300 max-w-xs leading-relaxed">
+          <p className="text-xs text-slate-300 max-w-xs leading-relaxed mb-4">
             {t.first_to_points}
           </p>
+
+          {/* Velocity Preset Selector */}
+          <div className="flex flex-col items-center gap-1.5">
+            <span className="text-[10px] font-mono text-slate-400 uppercase tracking-widest">
+              Duel Velocity:
+            </span>
+            <div className="flex items-center gap-1.5 bg-slate-900/90 p-1.5 rounded-2xl border border-slate-800 shadow-xl">
+              <button
+                id="duel-countdown-speed-turbo"
+                onClick={() => {
+                  setSpeedMode('turbo');
+                  soundEngine.playTap();
+                  triggerHaptic('tap');
+                }}
+                className={`px-3 py-1.5 rounded-xl text-xs font-black transition active:scale-95 ${
+                  speedMode === 'turbo'
+                    ? 'bg-cyan-500 text-slate-950 shadow-md shadow-cyan-500/30'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                ⚡ TURBO (Fast)
+              </button>
+              <button
+                id="duel-countdown-speed-overdrive"
+                onClick={() => {
+                  setSpeedMode('overdrive');
+                  soundEngine.playTap();
+                  triggerHaptic('tap');
+                }}
+                className={`px-3 py-1.5 rounded-xl text-xs font-black transition active:scale-95 ${
+                  speedMode === 'overdrive'
+                    ? 'bg-rose-500 text-white shadow-md shadow-rose-500/30 animate-pulse'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                🔥 OVERDRIVE (Insane)
+              </button>
+              <button
+                id="duel-countdown-speed-standard"
+                onClick={() => {
+                  setSpeedMode('standard');
+                  soundEngine.playTap();
+                  triggerHaptic('tap');
+                }}
+                className={`px-2.5 py-1.5 rounded-xl text-xs font-bold transition active:scale-95 ${
+                  speedMode === 'standard'
+                    ? 'bg-slate-700 text-white shadow-md'
+                    : 'text-slate-500 hover:text-white'
+                }`}
+              >
+                ⏱️ Normal
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

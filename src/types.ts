@@ -20,6 +20,7 @@ export interface UserProfile {
   hapticsEnabled: boolean;
   theme: 'dark' | 'light';
   language: Language;
+  speedPreference?: 'standard' | 'turbo' | 'overdrive';
 }
 
 export interface ReplayEvent {

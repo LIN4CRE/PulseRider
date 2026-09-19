@@ -39,6 +39,7 @@ export const SoloGame: React.FC<SoloGameProps> = ({
   const isDark = profile.theme === 'dark';
 
   const [gameState, setGameState] = useState<'countdown' | 'playing' | 'paused' | 'ended'>('countdown');
+  const [speedMode, setSpeedMode] = useState<'turbo' | 'overdrive' | 'standard'>(profile.speedPreference || 'turbo');
   const [countdown, setCountdown] = useState(3);
   const [score, setScore] = useState(0);
   const [combo, setCombo] = useState(0);
@@ -125,13 +126,29 @@ export const SoloGame: React.FC<SoloGameProps> = ({
   useEffect(() => {
     if (gameState !== 'playing') return;
 
-    // Escalating spawn rate based on score
-    const baseInterval = Math.max(480, 1050 - Math.min(score / 50, 550));
-    const intervalTime = slowMoActive ? baseInterval * 1.5 : baseInterval;
+    // High velocity spawn parameters based on speed mode
+    let baseInterval = Math.max(260, 520 - Math.min(score / 35, 260));
+    let duration = slowMoActive ? 1400 : Math.max(580, 1050 - Math.min(score / 30, 470));
+    let maxTargets = 7;
+    let hazardChance = 0.14;
+
+    if (speedMode === 'overdrive') {
+      baseInterval = Math.max(170, 340 - Math.min(score / 25, 170));
+      duration = slowMoActive ? 1000 : Math.max(420, 740 - Math.min(score / 25, 320));
+      maxTargets = 8;
+      hazardChance = 0.18;
+    } else if (speedMode === 'standard') {
+      baseInterval = Math.max(450, 850 - Math.min(score / 50, 400));
+      duration = slowMoActive ? 2200 : Math.max(1000, 1550 - Math.min(score / 45, 550));
+      maxTargets = 5;
+      hazardChance = 0.11;
+    }
+
+    const intervalTime = slowMoActive ? baseInterval * 1.4 : baseInterval;
 
     const spawner = setInterval(() => {
       setTargets(current => {
-        if (current.length >= 5) return current;
+        if (current.length >= maxTargets) return current;
 
         const id = targetIdCounter.current++;
         // Keep within 15% to 85% so targets don't clip outside arena bounds
@@ -142,21 +159,19 @@ export const SoloGame: React.FC<SoloGameProps> = ({
         let type: PulseTarget['type'] = 'standard';
         let color = '#38bdf8'; // neon cyan
 
-        if (rand < 0.12) {
+        if (rand < hazardChance) {
           type = 'hazard'; // Red danger
           color = '#ef4444';
-        } else if (rand < 0.20) {
+        } else if (rand < hazardChance + 0.08) {
           type = 'golden'; // Fever Surge
           color = '#f59e0b';
-        } else if (rand < 0.26) {
+        } else if (rand < hazardChance + 0.14) {
           type = 'freeze'; // Slow-mo
           color = '#06b6d4';
-        } else if (rand < 0.32) {
+        } else if (rand < hazardChance + 0.20) {
           type = 'surge'; // Shield
           color = '#a855f7';
         }
-
-        const duration = slowMoActive ? 2200 : Math.max(1200, 1850 - Math.min(score / 45, 650));
 
         return [
           ...current,
@@ -176,7 +191,7 @@ export const SoloGame: React.FC<SoloGameProps> = ({
     }, intervalTime);
 
     return () => clearInterval(spawner);
-  }, [gameState, score, slowMoActive]);
+  }, [gameState, score, slowMoActive, speedMode]);
 
   // Expiration check loop
   useEffect(() => {
@@ -360,14 +375,14 @@ export const SoloGame: React.FC<SoloGameProps> = ({
     let hitGrade: 'PERFECT' | 'GREAT' | 'GOOD' = 'GOOD';
     let addedPoints = target.points;
 
-    if (accuracyDelta < 0.13) {
+    if (accuracyDelta < 0.10) {
       hitGrade = 'PERFECT';
       addedPoints = Math.round(target.points * 1.5);
       setPerfectCount(p => p + 1);
       soundEngine.playTap('PERFECT', combo + 1);
       triggerHaptic('tap');
       spawnFloatingScore(target.x, target.y, t.perfect, 'text-emerald-400', `+${addedPoints}`);
-    } else if (accuracyDelta < 0.24) {
+    } else if (accuracyDelta < 0.20) {
       hitGrade = 'GREAT';
       addedPoints = Math.round(target.points * 1.2);
       setGreatCount(g => g + 1);
@@ -381,7 +396,8 @@ export const SoloGame: React.FC<SoloGameProps> = ({
     }
 
     const currentMultiplier = feverActive ? 3 : Math.min(4, 1 + Math.floor(combo / 8));
-    const totalGain = addedPoints * currentMultiplier;
+    const speedBonus = speedMode === 'overdrive' ? 1.5 : 1;
+    const totalGain = Math.round(addedPoints * currentMultiplier * speedBonus);
 
     // Record hit event for match replay
     replayEventsRef.current.push({
@@ -409,8 +425,8 @@ export const SoloGame: React.FC<SoloGameProps> = ({
   const handleArenaTap = (e: React.PointerEvent<HTMLDivElement>) => {
     if (gameState !== 'playing') return;
 
-    // Discard synthetic / bubble events right after a target tap
-    if (Date.now() - lastTapHandledTimeRef.current < 260) {
+    // Discard synthetic / bubble events right after a target tap (reduced for ultra-fast multi-tapping)
+    if (Date.now() - lastTapHandledTimeRef.current < 100) {
       return;
     }
 
@@ -491,6 +507,15 @@ export const SoloGame: React.FC<SoloGameProps> = ({
     onGameOver(analytics, isNewHigh);
   };
 
+  const cycleSpeedMode = () => {
+    soundEngine.playTap();
+    triggerHaptic('tap');
+    setSpeedMode(prev => {
+      const next = prev === 'turbo' ? 'overdrive' : prev === 'overdrive' ? 'standard' : 'turbo';
+      return next;
+    });
+  };
+
   return (
     <div
       id="solo-game-container"
@@ -499,18 +524,18 @@ export const SoloGame: React.FC<SoloGameProps> = ({
       }`}
     >
       {/* HUD Header */}
-      <div className={`flex items-center justify-between px-4 py-2 border-b backdrop-blur-md z-20 transition-colors ${
+      <div className={`flex items-center justify-between px-3 py-2 border-b backdrop-blur-md z-20 transition-colors ${
         feverActive 
           ? 'bg-amber-950/40 border-amber-500/40 shadow-[0_0_15px_rgba(245,158,11,0.2)]'
           : isDark ? 'bg-slate-900/80 border-slate-800' : 'bg-white/80 border-slate-200 shadow-sm'
       }`}>
         {/* Lives & Shield */}
         <div className="flex items-center gap-1.5">
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-0.5">
             {[...Array(3)].map((_, i) => (
               <Heart
                 key={i}
-                className={`w-5 h-5 transition-transform duration-200 ${
+                className={`w-4 h-4 transition-transform duration-200 ${
                   i < lives ? 'text-rose-500 fill-rose-500 scale-100' : 'text-slate-600 scale-75'
                 }`}
               />
@@ -518,7 +543,7 @@ export const SoloGame: React.FC<SoloGameProps> = ({
           </div>
           {hasShield && (
             <span className="flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-400 border border-purple-500/40 text-[10px] font-bold">
-              <Shield className="w-3 h-3" /> Shield
+              <Shield className="w-3 h-3" />
             </span>
           )}
         </div>
@@ -542,22 +567,35 @@ export const SoloGame: React.FC<SoloGameProps> = ({
           </div>
         </div>
 
-        {/* Controls & FPS Counter */}
-        <div className="flex items-center gap-1.5">
-          <div className="hidden sm:flex items-center gap-1 px-1.5 py-0.5 rounded bg-slate-800/80 border border-slate-700/60 text-[10px] font-mono text-emerald-400" title="Frame Rate">
-            <Gauge className="w-2.5 h-2.5" /> {currentFps} FPS
-          </div>
+        {/* Speed Mode Pill & Controls */}
+        <div className="flex items-center gap-1">
+          {/* Speed Mode Toggle */}
+          <button
+            id="solo-speed-mode-toggle"
+            onClick={cycleSpeedMode}
+            title="Switch Reflex Pacing: Turbo, Overdrive, Standard"
+            className={`px-2 py-1 rounded-xl text-[10px] font-black tracking-wider uppercase border flex items-center gap-1 active:scale-95 transition ${
+              speedMode === 'overdrive'
+                ? 'bg-rose-500/20 text-rose-300 border-rose-500/50 shadow-sm shadow-rose-500/20 animate-pulse'
+                : speedMode === 'turbo'
+                ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40'
+                : 'bg-slate-800 text-slate-400 border-slate-700'
+            }`}
+          >
+            {speedMode === 'overdrive' ? '🔥 OVERDRIVE' : speedMode === 'turbo' ? '⚡ TURBO' : '⏱️ NORMAL'}
+          </button>
+
           <button
             id="solo-pause-btn"
             onClick={() => setGameState(gameState === 'playing' ? 'paused' : 'playing')}
-            className={`p-2 rounded-xl transition active:scale-95 ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-700'}`}
+            className={`p-1.5 rounded-xl transition active:scale-95 ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-700'}`}
           >
             {gameState === 'playing' ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
           </button>
           <button
             id="solo-exit-btn"
             onClick={onBackToMenu}
-            className={`p-2 rounded-xl transition active:scale-95 ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-700'}`}
+            className={`p-1.5 rounded-xl transition active:scale-95 ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-700'}`}
           >
             <ArrowLeft className="w-4 h-4" />
           </button>
@@ -693,13 +731,67 @@ export const SoloGame: React.FC<SoloGameProps> = ({
 
         {/* Countdown Overlay */}
         {gameState === 'countdown' && (
-          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm flex flex-col items-center justify-center z-30">
+          <div className="absolute inset-0 bg-black/75 backdrop-blur-sm flex flex-col items-center justify-center z-30 p-4">
             <div className="text-7xl font-black text-cyan-400 font-mono animate-bounce">
               {countdown > 0 ? countdown : 'GO!'}
             </div>
-            <p className="mt-4 text-xs font-semibold text-slate-300 uppercase tracking-widest">
+            <p className="mt-2 text-xs font-semibold text-slate-300 uppercase tracking-widest">
               {t.play_solo}
             </p>
+
+            {/* Velocity Preset Selector */}
+            <div className="mt-6 flex flex-col items-center gap-2">
+              <span className="text-[10px] font-mono text-slate-400 uppercase tracking-widest">
+                Target Velocity & Reflex Tempo:
+              </span>
+              <div className="flex items-center gap-1.5 bg-slate-900/90 p-1.5 rounded-2xl border border-slate-800 shadow-xl">
+                <button
+                  id="countdown-speed-turbo"
+                  onClick={() => {
+                    setSpeedMode('turbo');
+                    soundEngine.playTap();
+                    triggerHaptic('tap');
+                  }}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-black transition active:scale-95 ${
+                    speedMode === 'turbo'
+                      ? 'bg-cyan-500 text-slate-950 shadow-md shadow-cyan-500/30'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  ⚡ TURBO (Fast)
+                </button>
+                <button
+                  id="countdown-speed-overdrive"
+                  onClick={() => {
+                    setSpeedMode('overdrive');
+                    soundEngine.playTap();
+                    triggerHaptic('tap');
+                  }}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-black transition active:scale-95 ${
+                    speedMode === 'overdrive'
+                      ? 'bg-rose-500 text-white shadow-md shadow-rose-500/30 animate-pulse'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  🔥 OVERDRIVE (Insane)
+                </button>
+                <button
+                  id="countdown-speed-standard"
+                  onClick={() => {
+                    setSpeedMode('standard');
+                    soundEngine.playTap();
+                    triggerHaptic('tap');
+                  }}
+                  className={`px-2.5 py-1.5 rounded-xl text-xs font-bold transition active:scale-95 ${
+                    speedMode === 'standard'
+                      ? 'bg-slate-700 text-white shadow-md'
+                      : 'text-slate-500 hover:text-white'
+                  }`}
+                >
+                  ⏱️ Normal
+                </button>
+              </div>
+            </div>
           </div>
         )}
 
@@ -741,8 +833,19 @@ export const SoloGame: React.FC<SoloGameProps> = ({
                 </div>
               )}
 
-              <div className="text-3xl font-black font-mono text-cyan-400 mb-4">
+              <div className="text-3xl font-black font-mono text-cyan-400 mb-2">
                 {score.toLocaleString()}
+              </div>
+              <div className="mb-4">
+                <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-black tracking-wider uppercase border ${
+                  speedMode === 'overdrive'
+                    ? 'bg-rose-500/20 text-rose-300 border-rose-500/50'
+                    : speedMode === 'turbo'
+                    ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500/50'
+                    : 'bg-slate-800 text-slate-300 border-slate-700'
+                }`}>
+                  {speedMode === 'overdrive' ? '🔥 OVERDRIVE MODE' : speedMode === 'turbo' ? '⚡ TURBO PACED' : '⏱️ NORMAL PACED'}
+                </span>
               </div>
 
               {/* Performance Stats Grid */}

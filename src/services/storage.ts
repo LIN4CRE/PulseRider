@@ -27,6 +27,7 @@ const defaultProfile: UserProfile = {
   hapticsEnabled: true,
   theme: 'dark',
   language: 'en',
+  speedPreference: 'turbo',
 };
 
 const initialChallenges: DailyChallenge[] = [

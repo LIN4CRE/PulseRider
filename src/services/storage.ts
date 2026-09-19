@@ -23,6 +23,7 @@ const defaultProfile: UserProfile = {
   duelLosses: 0,
   syncCode: `HP-${Math.floor(1000 + Math.random() * 9000)}`,
   soundEnabled: true,
+  musicEnabled: true,
   hapticsEnabled: true,
   theme: 'dark',
   language: 'en',

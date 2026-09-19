@@ -16,6 +16,7 @@ export interface UserProfile {
   syncCode: string;
   lastSyncedAt?: string;
   soundEnabled: boolean;
+  musicEnabled: boolean;
   hapticsEnabled: boolean;
   theme: 'dark' | 'light';
   language: Language;

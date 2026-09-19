@@ -50,7 +50,8 @@ export default function App() {
   // Audio configuration sync
   useEffect(() => {
     soundEngine.setEnabled(profile.soundEnabled);
-  }, [profile.soundEnabled]);
+    soundEngine.setMusicEnabled(profile.musicEnabled ?? true);
+  }, [profile.soundEnabled, profile.musicEnabled]);
 
   // Handle automatic background sync when returning online
   useEffect(() => {

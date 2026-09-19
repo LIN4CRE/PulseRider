@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, User, Cloud, RefreshCw, Copy, Check, ShieldCheck, Trophy, Sparkles, DownloadCloud } from 'lucide-react';
+import { X, User, Cloud, RefreshCw, Copy, Check, ShieldCheck, Trophy, Sparkles, DownloadCloud, Volume2, Music } from 'lucide-react';
 import { UserProfile } from '../types';
 import { translations } from '../i18n/translations';
 import { backupToCloud, restoreFromCloud } from '../services/storage';
@@ -181,6 +181,51 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
               <span className="text-[10px] text-slate-400 font-bold block">{t.combo_max}</span>
               <span className="font-mono font-black text-cyan-300 text-sm">{profile.bestCombo || 0}x</span>
             </div>
+          </div>
+        </div>
+
+        {/* Audio & Music Controls */}
+        <div className="p-3.5 rounded-xl bg-slate-800/50 border border-slate-700/60 mb-4 space-y-2.5">
+          <div className="text-xs font-bold text-slate-300 flex items-center justify-between">
+            <span className="flex items-center gap-1.5">
+              <Volume2 className="w-3.5 h-3.5 text-cyan-400" /> Audio & Sound
+            </span>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              onClick={() => {
+                const next = !profile.soundEnabled;
+                soundEngine.setEnabled(next);
+                onUpdateProfile({ soundEnabled: next });
+                if (next) soundEngine.playTap('GOOD');
+              }}
+              className={`p-2 rounded-lg flex items-center justify-between border transition text-xs font-bold ${
+                profile.soundEnabled
+                  ? 'bg-cyan-950/40 border-cyan-500/40 text-cyan-300'
+                  : 'bg-slate-900/60 border-slate-800 text-slate-500'
+              }`}
+            >
+              <span>SFX</span>
+              <span>{profile.soundEnabled ? 'ON' : 'OFF'}</span>
+            </button>
+            <button
+              onClick={() => {
+                const next = !(profile.musicEnabled ?? true);
+                soundEngine.setMusicEnabled(next);
+                onUpdateProfile({ musicEnabled: next });
+                soundEngine.playTap('GOOD');
+              }}
+              className={`p-2 rounded-lg flex items-center justify-between border transition text-xs font-bold ${
+                (profile.musicEnabled ?? true)
+                  ? 'bg-fuchsia-950/40 border-fuchsia-500/40 text-fuchsia-300'
+                  : 'bg-slate-900/60 border-slate-800 text-slate-500'
+              }`}
+            >
+              <span className="flex items-center gap-1">
+                <Music className="w-3 h-3" /> Gentle Music
+              </span>
+              <span>{(profile.musicEnabled ?? true) ? 'ON' : 'OFF'}</span>
+            </button>
           </div>
         </div>
 

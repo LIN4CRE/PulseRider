@@ -66,6 +66,7 @@ export const SoloGame: React.FC<SoloGameProps> = ({
   const arenaRef = useRef<HTMLDivElement>(null);
   const frameCountRef = useRef(0);
   const lastFpsCheckRef = useRef(performance.now());
+  const lastTapHandledTimeRef = useRef(0);
 
   // 60fps monitor loop
   useEffect(() => {
@@ -240,7 +241,7 @@ export const SoloGame: React.FC<SoloGameProps> = ({
   const handleTargetMiss = useCallback(() => {
     if (hasShield) {
       setHasShield(false);
-      soundEngine.playTap();
+      soundEngine.playTap('GOOD');
       triggerHaptic('tap');
       spawnFloatingScore(50, 40, 'SHIELD BROKEN', 'text-purple-400');
       return;
@@ -262,7 +263,13 @@ export const SoloGame: React.FC<SoloGameProps> = ({
   }, [hasShield, t.miss]);
 
   const handleTargetTap = (target: PulseTarget, e: React.PointerEvent | React.TouchEvent | React.MouseEvent) => {
+    e.preventDefault();
     e.stopPropagation();
+    if (e.nativeEvent) {
+      e.nativeEvent.stopImmediatePropagation?.();
+    }
+    lastTapHandledTimeRef.current = Date.now();
+
     if (gameState !== 'playing' || target.tapped) return;
 
     const now = Date.now();
@@ -324,18 +331,18 @@ export const SoloGame: React.FC<SoloGameProps> = ({
       hitGrade = 'PERFECT';
       addedPoints = Math.round(target.points * 1.5);
       setPerfectCount(p => p + 1);
-      soundEngine.playTap(true, combo + 1);
+      soundEngine.playTap('PERFECT', combo + 1);
       triggerHaptic('tap');
       spawnFloatingScore(target.x, target.y, t.perfect, 'text-emerald-400', `+${addedPoints}`);
     } else if (accuracyDelta < 0.24) {
       hitGrade = 'GREAT';
       addedPoints = Math.round(target.points * 1.2);
       setGreatCount(g => g + 1);
-      soundEngine.playTap(false, combo + 1);
+      soundEngine.playTap('GREAT', combo + 1);
       triggerHaptic('tap');
       spawnFloatingScore(target.x, target.y, t.great, 'text-cyan-300', `+${addedPoints}`);
     } else {
-      soundEngine.playTap(false, combo + 1);
+      soundEngine.playTap('GOOD', combo + 1);
       triggerHaptic('tap');
       spawnFloatingScore(target.x, target.y, 'GOOD', 'text-blue-300', `+${addedPoints}`);
     }
@@ -351,9 +358,46 @@ export const SoloGame: React.FC<SoloGameProps> = ({
     });
   };
 
-  const handleArenaMissClick = () => {
+  const handleArenaTap = (e: React.PointerEvent<HTMLDivElement>) => {
     if (gameState !== 'playing') return;
-    handleTargetMiss();
+
+    // Discard synthetic / bubble events right after a target tap
+    if (Date.now() - lastTapHandledTimeRef.current < 260) {
+      return;
+    }
+
+    // Proximity target matching: if tap was within 12% screen radius of an active target, register as a hit
+    const rect = arenaRef.current?.getBoundingClientRect();
+    if (rect && targets.length > 0) {
+      const tapX = ((e.clientX - rect.left) / rect.width) * 100;
+      const tapY = ((e.clientY - rect.top) / rect.height) * 100;
+
+      let closestTarget: PulseTarget | null = null;
+      let minDistance = Infinity;
+
+      for (const t of targets) {
+        if (t.tapped) continue;
+        const dist = Math.hypot(t.x - tapX, t.y - tapY);
+        if (dist < minDistance) {
+          minDistance = dist;
+          closestTarget = t;
+        }
+      }
+
+      // If finger was near any target, register the hit
+      if (closestTarget && minDistance < 13) {
+        handleTargetTap(closestTarget, e);
+        return;
+      }
+    }
+
+    // Tapping completely empty space:
+    // Only reset combo and play soft air swoosh; NEVER deduct lives!
+    if (combo > 0) {
+      setCombo(0);
+      spawnFloatingScore(50, 40, 'COMBO BREAK', 'text-slate-400');
+    }
+    soundEngine.playEmptyTap();
   };
 
   const endGame = () => {
@@ -471,7 +515,7 @@ export const SoloGame: React.FC<SoloGameProps> = ({
       <div
         ref={arenaRef}
         id="touch-game-arena"
-        onPointerDown={handleArenaMissClick}
+        onPointerDown={handleArenaTap}
         className={`relative flex-1 w-full overflow-hidden select-none touch-none cursor-crosshair transition-all duration-300 ${
           feverActive ? 'anim-fever-aura' : combo >= 6 ? 'anim-combo-aura' : ''
         } ${
@@ -549,7 +593,7 @@ export const SoloGame: React.FC<SoloGameProps> = ({
                 top: `${target.y}%`,
               }}
               onPointerDown={(e) => handleTargetTap(target, e)}
-              className="absolute -translate-x-1/2 -translate-y-1/2 w-20 h-20 flex items-center justify-center cursor-pointer select-none touch-none active:scale-90 transition-transform"
+              className="absolute -translate-x-1/2 -translate-y-1/2 w-22 h-22 flex items-center justify-center cursor-pointer select-none touch-none active:scale-95 transition-transform"
             >
               {/* Outer Collapsing Ring (Exact Timing Cue) */}
               <div

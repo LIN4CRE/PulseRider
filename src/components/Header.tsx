@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Volume2, VolumeX, Moon, Sun, Globe, Bell, User, Zap, Sparkles } from 'lucide-react';
+import { Volume2, VolumeX, Moon, Sun, Globe, Bell, User, Zap, Sparkles, Music } from 'lucide-react';
 import { UserProfile, Language } from '../types';
 import { translations } from '../i18n/translations';
 import { soundEngine } from '../services/audio';
@@ -38,7 +38,14 @@ export const Header: React.FC<HeaderProps> = ({
     const nextState = !profile.soundEnabled;
     soundEngine.setEnabled(nextState);
     onUpdateProfile({ soundEnabled: nextState });
-    if (nextState) soundEngine.playTap(true);
+    if (nextState) soundEngine.playTap('GOOD');
+  };
+
+  const toggleMusic = () => {
+    const nextState = !(profile.musicEnabled ?? true);
+    soundEngine.setMusicEnabled(nextState);
+    onUpdateProfile({ musicEnabled: nextState });
+    soundEngine.playTap('GOOD');
   };
 
   const toggleTheme = () => {
@@ -99,14 +106,31 @@ export const Header: React.FC<HeaderProps> = ({
             className={`p-2 rounded-xl transition ${
               isDark ? 'hover:bg-slate-800 text-slate-300' : 'hover:bg-slate-100 text-slate-600'
             }`}
-            title={profile.soundEnabled ? 'Mute Audio' : 'Unmute Audio'}
-            aria-label="Toggle Sound"
+            title={profile.soundEnabled ? 'Mute SFX' : 'Unmute SFX'}
+            aria-label="Toggle Sound Effects"
           >
             {profile.soundEnabled ? (
               <Volume2 className="w-4 h-4 text-cyan-400" />
             ) : (
               <VolumeX className="w-4 h-4 text-slate-500" />
             )}
+          </button>
+
+          {/* Soft Background Music Toggle */}
+          <button
+            id="header-music-btn"
+            onClick={toggleMusic}
+            className={`p-2 rounded-xl transition ${
+              isDark ? 'hover:bg-slate-800 text-slate-300' : 'hover:bg-slate-100 text-slate-600'
+            }`}
+            title={(profile.musicEnabled ?? true) ? 'Mute Ambient Music' : 'Play Gentle Ambient Music'}
+            aria-label="Toggle Background Music"
+          >
+            <Music
+              className={`w-4 h-4 transition-colors ${
+                (profile.musicEnabled ?? true) ? 'text-fuchsia-400' : 'text-slate-500'
+              }`}
+            />
           </button>
 
           {/* Dark/Light Mode Toggle */}

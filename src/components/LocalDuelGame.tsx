@@ -143,15 +143,19 @@ export const LocalDuelGame: React.FC<LocalDuelGameProps> = ({
   }, [gameState]);
 
   // Target Tap Handler
-  const handleTap = (target: DuelTarget, e: React.TouchEvent | React.MouseEvent) => {
+  const handleTap = (target: DuelTarget, e: React.PointerEvent | React.TouchEvent | React.MouseEvent) => {
+    e.preventDefault();
     e.stopPropagation();
+    if (e.nativeEvent) {
+      e.nativeEvent.stopImmediatePropagation?.();
+    }
     if (gameState !== 'playing') return;
 
-    // Remove target
+    // Remove target immediately
     setTargets(cur => cur.filter(t => t.id !== target.id));
 
     const isP1 = target.player === 1;
-    soundEngine.playTap(true, isP1 ? p1Combo : p2Combo);
+    soundEngine.playTap('PERFECT', isP1 ? p1Combo + 1 : p2Combo + 1);
     triggerHaptic('tap');
 
     // Sabotage activates opponent glitch
@@ -263,7 +267,7 @@ export const LocalDuelGame: React.FC<LocalDuelGameProps> = ({
               top: `${target.y}%`,
             }}
             onPointerDown={(e) => handleTap(target, e)}
-            className="absolute -translate-x-1/2 -translate-y-1/2 w-18 h-18 flex items-center justify-center cursor-pointer select-none touch-none active:scale-90 transition-transform"
+            className="absolute -translate-x-1/2 -translate-y-1/2 w-20 h-20 flex items-center justify-center cursor-pointer select-none touch-none active:scale-95 transition-transform"
           >
             {/* GPU Collapsing ring */}
             <div
@@ -368,7 +372,7 @@ export const LocalDuelGame: React.FC<LocalDuelGameProps> = ({
               top: `${target.y}%`,
             }}
             onPointerDown={(e) => handleTap(target, e)}
-            className="absolute -translate-x-1/2 -translate-y-1/2 w-18 h-18 flex items-center justify-center cursor-pointer select-none touch-none active:scale-90 transition-transform"
+            className="absolute -translate-x-1/2 -translate-y-1/2 w-20 h-20 flex items-center justify-center cursor-pointer select-none touch-none active:scale-95 transition-transform"
           >
             {/* GPU Collapsing ring */}
             <div

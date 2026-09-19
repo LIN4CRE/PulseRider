@@ -1,0 +1,6 @@
+{
+  "name": "HyperPulse: Touch Duel & Reflex Rush",
+  "description": "Fast-paced mobile reflex game with competitive local multiplayer duel, leaderboards, cloud sync, analytics, and offline support.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

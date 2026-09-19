@@ -262,30 +262,39 @@ export const LocalDuelGame: React.FC<LocalDuelGameProps> = ({
               left: `${target.x}%`,
               top: `${target.y}%`,
             }}
-            onTouchStart={(e) => handleTap(target, e)}
-            onMouseDown={(e) => handleTap(target, e)}
-            className="absolute -translate-x-1/2 -translate-y-1/2 w-16 h-16 flex items-center justify-center cursor-pointer active:scale-90 transition-transform"
+            onPointerDown={(e) => handleTap(target, e)}
+            className="absolute -translate-x-1/2 -translate-y-1/2 w-18 h-18 flex items-center justify-center cursor-pointer select-none touch-none active:scale-90 transition-transform"
           >
+            {/* GPU Collapsing ring */}
             <div
               style={{
                 animationDuration: `${target.duration}ms`,
                 borderColor: target.color,
+                boxShadow: `0 0 10px ${target.color}88`,
               }}
-              className="absolute inset-0 rounded-full border-2 opacity-80 animate-ping pointer-events-none"
+              className="absolute inset-0 rounded-full border-2 anim-collapse-ring pointer-events-none"
+            />
+            {/* Inner pulsing boundary */}
+            <div
+              style={{
+                animationDuration: '6s',
+                borderColor: `${target.color}66`,
+              }}
+              className="absolute inset-1.5 rounded-full border border-dashed opacity-70 animate-spin pointer-events-none"
             />
             <div
               style={{
                 backgroundColor: target.type === 'sabotage' ? '#ec4899' : target.type === 'golden' ? '#f59e0b' : '#f43f5e',
-                boxShadow: `0 0 14px ${target.color}`,
+                boxShadow: `0 0 16px ${target.color}`,
               }}
-              className="w-11 h-11 rounded-full flex items-center justify-center font-bold text-slate-950 text-xs shadow-lg"
+              className="w-11 h-11 rounded-full flex items-center justify-center font-bold text-slate-950 text-xs shadow-lg pointer-events-none"
             >
               {target.type === 'sabotage' ? (
-                <Zap className="w-4 h-4 text-white fill-white" />
+                <Zap className="w-4 h-4 text-white fill-white animate-bounce" />
               ) : target.type === 'golden' ? (
                 <Flame className="w-4 h-4 text-slate-950 fill-slate-950" />
               ) : (
-                <span className="text-white font-mono font-bold text-xs">HIT</span>
+                <span className="text-white font-mono font-extrabold text-xs">PULSE</span>
               )}
             </div>
           </div>
@@ -358,30 +367,39 @@ export const LocalDuelGame: React.FC<LocalDuelGameProps> = ({
               left: `${target.x}%`,
               top: `${target.y}%`,
             }}
-            onTouchStart={(e) => handleTap(target, e)}
-            onMouseDown={(e) => handleTap(target, e)}
-            className="absolute -translate-x-1/2 -translate-y-1/2 w-16 h-16 flex items-center justify-center cursor-pointer active:scale-90 transition-transform"
+            onPointerDown={(e) => handleTap(target, e)}
+            className="absolute -translate-x-1/2 -translate-y-1/2 w-18 h-18 flex items-center justify-center cursor-pointer select-none touch-none active:scale-90 transition-transform"
           >
+            {/* GPU Collapsing ring */}
             <div
               style={{
                 animationDuration: `${target.duration}ms`,
                 borderColor: target.color,
+                boxShadow: `0 0 10px ${target.color}88`,
               }}
-              className="absolute inset-0 rounded-full border-2 opacity-80 animate-ping pointer-events-none"
+              className="absolute inset-0 rounded-full border-2 anim-collapse-ring pointer-events-none"
+            />
+            {/* Inner pulsing boundary */}
+            <div
+              style={{
+                animationDuration: '6s',
+                borderColor: `${target.color}66`,
+              }}
+              className="absolute inset-1.5 rounded-full border border-dashed opacity-70 animate-spin pointer-events-none"
             />
             <div
               style={{
                 backgroundColor: target.type === 'sabotage' ? '#ec4899' : target.type === 'golden' ? '#f59e0b' : '#0284c7',
-                boxShadow: `0 0 14px ${target.color}`,
+                boxShadow: `0 0 16px ${target.color}`,
               }}
-              className="w-11 h-11 rounded-full flex items-center justify-center font-bold text-slate-950 text-xs shadow-lg"
+              className="w-11 h-11 rounded-full flex items-center justify-center font-bold text-slate-950 text-xs shadow-lg pointer-events-none"
             >
               {target.type === 'sabotage' ? (
-                <Zap className="w-4 h-4 text-white fill-white" />
+                <Zap className="w-4 h-4 text-white fill-white animate-bounce" />
               ) : target.type === 'golden' ? (
                 <Flame className="w-4 h-4 text-slate-950 fill-slate-950" />
               ) : (
-                <span className="text-white font-mono font-bold text-xs">HIT</span>
+                <span className="text-white font-mono font-extrabold text-xs">PULSE</span>
               )}
             </div>
           </div>

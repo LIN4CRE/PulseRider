@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Heart, Pause, Play, RotateCcw, Zap, Flame, Shield, ArrowLeft, Trophy, Award } from 'lucide-react';
+import { Heart, Pause, Play, RotateCcw, Zap, Flame, Shield, ArrowLeft, Trophy, Gauge } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { UserProfile, MatchAnalytics, PulseTarget } from '../types';
 import { translations } from '../i18n/translations';
@@ -9,6 +9,25 @@ interface SoloGameProps {
   profile: UserProfile;
   onGameOver: (analytics: MatchAnalytics, newHighScore: boolean) => void;
   onBackToMenu: () => void;
+}
+
+interface FloatingScore {
+  id: number;
+  x: number;
+  y: number;
+  text: string;
+  color: string;
+  points?: string;
+}
+
+interface HitParticle {
+  id: number;
+  x: number;
+  y: number;
+  tx: number;
+  ty: number;
+  color: string;
+  size: number;
 }
 
 export const SoloGame: React.FC<SoloGameProps> = ({
@@ -29,20 +48,43 @@ export const SoloGame: React.FC<SoloGameProps> = ({
   const [feverActive, setFeverActive] = useState(false);
   const [feverTimer, setFeverTimer] = useState(0);
   const [slowMoActive, setSlowMoActive] = useState(false);
-  
+  const [currentFps, setCurrentFps] = useState(60);
+
   // Performance analytics tracking
   const [perfectCount, setPerfectCount] = useState(0);
   const [greatCount, setGreatCount] = useState(0);
   const [missCount, setMissCount] = useState(0);
   const [reactionTimes, setReactionTimes] = useState<number[]>([]);
 
-  // Feedback animations
-  const [hitFeedback, setHitFeedback] = useState<{ text: string; color: string; id: number } | null>(null);
+  // Floating score tags & particle sparks
+  const [floatingScores, setFloatingScores] = useState<FloatingScore[]>([]);
+  const [particles, setParticles] = useState<HitParticle[]>([]);
 
   // Targets currently on board
   const [targets, setTargets] = useState<PulseTarget[]>([]);
   const targetIdCounter = useRef(1);
   const arenaRef = useRef<HTMLDivElement>(null);
+  const frameCountRef = useRef(0);
+  const lastFpsCheckRef = useRef(performance.now());
+
+  // 60fps monitor loop
+  useEffect(() => {
+    let animId: number;
+    const checkFps = () => {
+      frameCountRef.current++;
+      const now = performance.now();
+      if (now - lastFpsCheckRef.current >= 1000) {
+        const delta = (now - lastFpsCheckRef.current) / 1000;
+        const calculatedFps = Math.min(120, Math.round(frameCountRef.current / delta));
+        setCurrentFps(calculatedFps);
+        frameCountRef.current = 0;
+        lastFpsCheckRef.current = now;
+      }
+      animId = requestAnimationFrame(checkFps);
+    };
+    animId = requestAnimationFrame(checkFps);
+    return () => cancelAnimationFrame(animId);
+  }, []);
 
   // Countdown effect
   useEffect(() => {
@@ -79,17 +121,17 @@ export const SoloGame: React.FC<SoloGameProps> = ({
     if (gameState !== 'playing') return;
 
     // Escalating spawn rate based on score
-    const baseInterval = Math.max(500, 1100 - Math.min(score / 50, 600));
+    const baseInterval = Math.max(480, 1050 - Math.min(score / 50, 550));
     const intervalTime = slowMoActive ? baseInterval * 1.5 : baseInterval;
 
     const spawner = setInterval(() => {
       setTargets(current => {
-        if (current.length >= 5) return current; // limit concurrent targets
+        if (current.length >= 5) return current;
 
         const id = targetIdCounter.current++;
-        // Keep within 12% to 88% so targets don't clip outside mobile frame
-        const x = Math.floor(12 + Math.random() * 74);
-        const y = Math.floor(12 + Math.random() * 74);
+        // Keep within 15% to 85% so targets don't clip outside arena bounds
+        const x = Math.floor(15 + Math.random() * 70);
+        const y = Math.floor(15 + Math.random() * 70);
 
         const rand = Math.random();
         let type: PulseTarget['type'] = 'standard';
@@ -106,10 +148,10 @@ export const SoloGame: React.FC<SoloGameProps> = ({
           color = '#06b6d4';
         } else if (rand < 0.32) {
           type = 'surge'; // Shield
-          color = '#8b5cf6';
+          color = '#a855f7';
         }
 
-        const duration = slowMoActive ? 2200 : Math.max(1200, 1900 - Math.min(score / 40, 700));
+        const duration = slowMoActive ? 2200 : Math.max(1200, 1850 - Math.min(score / 45, 650));
 
         return [
           ...current,
@@ -144,22 +186,63 @@ export const SoloGame: React.FC<SoloGameProps> = ({
             if (exp.type !== 'hazard') {
               // Missed a valid target!
               handleTargetMiss();
+            } else {
+              // Successfully avoided a hazard! Award small evasion bonus
+              setScore(s => s + 50);
+              spawnFloatingScore(exp.x, exp.y, 'EVADED!', 'text-emerald-400', '+50');
             }
           });
         }
         return current.filter(t => now - t.spawnTime <= t.duration && !t.tapped);
       });
-    }, 100);
+    }, 80);
 
     return () => clearInterval(cleanup);
   }, [gameState, hasShield]);
+
+  const spawnParticles = (xPct: number, yPct: number, color: string) => {
+    const newParticles: HitParticle[] = [];
+    const count = 10;
+    for (let i = 0; i < count; i++) {
+      const angle = (Math.PI * 2 * i) / count + (Math.random() - 0.5) * 0.4;
+      const dist = 35 + Math.random() * 45;
+      newParticles.push({
+        id: Date.now() + Math.random(),
+        x: xPct,
+        y: yPct,
+        tx: Math.cos(angle) * dist,
+        ty: Math.sin(angle) * dist,
+        color,
+        size: 3 + Math.random() * 4,
+      });
+    }
+    setParticles(prev => [...prev.slice(-25), ...newParticles]);
+    setTimeout(() => {
+      setParticles(prev => prev.filter(p => !newParticles.some(np => np.id === p.id)));
+    }, 550);
+  };
+
+  const spawnFloatingScore = (x: number, y: number, text: string, color: string, points?: string) => {
+    const item: FloatingScore = {
+      id: Date.now() + Math.random(),
+      x,
+      y,
+      text,
+      color,
+      points,
+    };
+    setFloatingScores(prev => [...prev.slice(-8), item]);
+    setTimeout(() => {
+      setFloatingScores(prev => prev.filter(f => f.id !== item.id));
+    }, 650);
+  };
 
   const handleTargetMiss = useCallback(() => {
     if (hasShield) {
       setHasShield(false);
       soundEngine.playTap();
       triggerHaptic('tap');
-      setHitFeedback({ text: 'SHIELD USED', color: 'text-purple-400', id: Date.now() });
+      spawnFloatingScore(50, 40, 'SHIELD BROKEN', 'text-purple-400');
       return;
     }
 
@@ -167,7 +250,7 @@ export const SoloGame: React.FC<SoloGameProps> = ({
     triggerHaptic('error');
     setCombo(0);
     setMissCount(m => m + 1);
-    setHitFeedback({ text: t.miss, color: 'text-rose-500', id: Date.now() });
+    spawnFloatingScore(50, 35, t.miss, 'text-rose-500');
 
     setLives(prevLives => {
       const next = prevLives - 1;
@@ -178,7 +261,7 @@ export const SoloGame: React.FC<SoloGameProps> = ({
     });
   }, [hasShield, t.miss]);
 
-  const handleTargetTap = (target: PulseTarget, e: React.TouchEvent | React.MouseEvent) => {
+  const handleTargetTap = (target: PulseTarget, e: React.PointerEvent | React.TouchEvent | React.MouseEvent) => {
     e.stopPropagation();
     if (gameState !== 'playing' || target.tapped) return;
 
@@ -192,6 +275,9 @@ export const SoloGame: React.FC<SoloGameProps> = ({
     // Mark as tapped immediately to prevent double hits
     setTargets(cur => cur.filter(t => t.id !== target.id));
 
+    // Spawn sparks
+    spawnParticles(target.x, target.y, target.color);
+
     // Handle Hazard
     if (target.type === 'hazard') {
       soundEngine.playMiss();
@@ -199,8 +285,8 @@ export const SoloGame: React.FC<SoloGameProps> = ({
       setCombo(0);
       setScore(s => Math.max(0, s - 200));
       setMissCount(m => m + 1);
-      setHitFeedback({ text: 'HAZARD HIT! -200', color: 'text-red-500', id: Date.now() });
-      
+      spawnFloatingScore(target.x, target.y, 'HAZARD HIT!', 'text-red-500', '-200');
+
       setLives(l => {
         const next = l - 1;
         if (next <= 0) endGame();
@@ -215,42 +301,43 @@ export const SoloGame: React.FC<SoloGameProps> = ({
       setFeverTimer(6);
       soundEngine.playPowerUp();
       triggerHaptic('success');
-      setHitFeedback({ text: 'FEVER MODE 3X!', color: 'text-amber-400', id: Date.now() });
+      spawnFloatingScore(target.x, target.y, 'FEVER 3X!', 'text-amber-400', '+500');
     } else if (target.type === 'freeze') {
       setSlowMoActive(true);
       setTimeout(() => setSlowMoActive(false), 4500);
       soundEngine.playPowerUp();
       triggerHaptic('tap');
-      setHitFeedback({ text: 'SLOW-MO ACTIVE', color: 'text-cyan-400', id: Date.now() });
+      spawnFloatingScore(target.x, target.y, 'SLOW-MO ACTIVE', 'text-cyan-400', '+200');
     } else if (target.type === 'surge') {
       setHasShield(true);
       soundEngine.playPowerUp();
       triggerHaptic('tap');
-      setHitFeedback({ text: 'SHIELD CHARGED!', color: 'text-purple-400', id: Date.now() });
+      spawnFloatingScore(target.x, target.y, 'SHIELD CHARGED!', 'text-purple-400', '+200');
     }
 
-    // Timing precision: optimal hit window is around 65% - 85% of ring collapse
-    const accuracyDelta = Math.abs(progress - 0.75);
+    // Timing precision: optimal hit window is when the collapsing ring meets the center circle (approx 70-85% collapsed)
+    const accuracyDelta = Math.abs(progress - 0.76);
     let hitGrade: 'PERFECT' | 'GREAT' | 'GOOD' = 'GOOD';
     let addedPoints = target.points;
 
-    if (accuracyDelta < 0.12) {
+    if (accuracyDelta < 0.13) {
       hitGrade = 'PERFECT';
       addedPoints = Math.round(target.points * 1.5);
       setPerfectCount(p => p + 1);
       soundEngine.playTap(true, combo + 1);
       triggerHaptic('tap');
-      setHitFeedback({ text: t.perfect, color: 'text-emerald-400', id: Date.now() });
-    } else if (accuracyDelta < 0.22) {
+      spawnFloatingScore(target.x, target.y, t.perfect, 'text-emerald-400', `+${addedPoints}`);
+    } else if (accuracyDelta < 0.24) {
       hitGrade = 'GREAT';
       addedPoints = Math.round(target.points * 1.2);
       setGreatCount(g => g + 1);
       soundEngine.playTap(false, combo + 1);
       triggerHaptic('tap');
-      setHitFeedback({ text: t.great, color: 'text-cyan-300', id: Date.now() });
+      spawnFloatingScore(target.x, target.y, t.great, 'text-cyan-300', `+${addedPoints}`);
     } else {
       soundEngine.playTap(false, combo + 1);
       triggerHaptic('tap');
+      spawnFloatingScore(target.x, target.y, 'GOOD', 'text-blue-300', `+${addedPoints}`);
     }
 
     const currentMultiplier = feverActive ? 3 : Math.min(4, 1 + Math.floor(combo / 8));
@@ -315,8 +402,10 @@ export const SoloGame: React.FC<SoloGameProps> = ({
       }`}
     >
       {/* HUD Header */}
-      <div className={`flex items-center justify-between px-4 py-2.5 border-b backdrop-blur-md z-20 ${
-        isDark ? 'bg-slate-900/80 border-slate-800' : 'bg-white/80 border-slate-200 shadow-sm'
+      <div className={`flex items-center justify-between px-4 py-2 border-b backdrop-blur-md z-20 transition-colors ${
+        feverActive 
+          ? 'bg-amber-950/40 border-amber-500/40 shadow-[0_0_15px_rgba(245,158,11,0.2)]'
+          : isDark ? 'bg-slate-900/80 border-slate-800' : 'bg-white/80 border-slate-200 shadow-sm'
       }`}>
         {/* Lives & Shield */}
         <div className="flex items-center gap-1.5">
@@ -342,10 +431,10 @@ export const SoloGame: React.FC<SoloGameProps> = ({
           <div className="font-extrabold text-xl tracking-tight font-mono text-cyan-400">
             {score.toLocaleString()}
           </div>
-          <div className="text-[10px] font-bold uppercase tracking-wider flex items-center justify-center gap-1">
+          <div className="text-[10px] font-bold uppercase tracking-wider flex items-center justify-center gap-1.5">
             {combo > 3 && (
-              <span className="flex items-center text-amber-400 animate-pulse">
-                <Flame className="w-3 h-3 fill-amber-400" /> {combo}x COMBO
+              <span className="flex items-center text-amber-400 animate-pulse font-mono">
+                <Flame className="w-3.5 h-3.5 fill-amber-400" /> {combo}x COMBO
               </span>
             )}
             {feverActive && (
@@ -356,19 +445,22 @@ export const SoloGame: React.FC<SoloGameProps> = ({
           </div>
         </div>
 
-        {/* Pause & Exit Controls */}
+        {/* Controls & FPS Counter */}
         <div className="flex items-center gap-1.5">
+          <div className="hidden sm:flex items-center gap-1 px-1.5 py-0.5 rounded bg-slate-800/80 border border-slate-700/60 text-[10px] font-mono text-emerald-400" title="Frame Rate">
+            <Gauge className="w-2.5 h-2.5" /> {currentFps} FPS
+          </div>
           <button
             id="solo-pause-btn"
             onClick={() => setGameState(gameState === 'playing' ? 'paused' : 'playing')}
-            className={`p-2 rounded-xl transition ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-700'}`}
+            className={`p-2 rounded-xl transition active:scale-95 ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-700'}`}
           >
             {gameState === 'playing' ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
           </button>
           <button
             id="solo-exit-btn"
             onClick={onBackToMenu}
-            className={`p-2 rounded-xl transition ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-700'}`}
+            className={`p-2 rounded-xl transition active:scale-95 ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-700'}`}
           >
             <ArrowLeft className="w-4 h-4" />
           </button>
@@ -379,28 +471,69 @@ export const SoloGame: React.FC<SoloGameProps> = ({
       <div
         ref={arenaRef}
         id="touch-game-arena"
-        onTouchStart={handleArenaMissClick}
-        onMouseDown={handleArenaMissClick}
-        className={`relative flex-1 w-full overflow-hidden touch-none cursor-pointer ${
+        onPointerDown={handleArenaMissClick}
+        className={`relative flex-1 w-full overflow-hidden select-none touch-none cursor-crosshair transition-all duration-300 ${
+          feverActive ? 'anim-fever-aura' : combo >= 6 ? 'anim-combo-aura' : ''
+        } ${
           isDark
             ? 'bg-radial from-slate-900 via-slate-950 to-slate-950'
             : 'bg-radial from-slate-100 via-slate-50 to-slate-100'
         }`}
       >
-        {/* Subtle grid lines for depth */}
-        <div className="absolute inset-0 opacity-10 bg-[linear-gradient(to_right,#808080_1px,transparent_1px),linear-gradient(to_bottom,#808080_1px,transparent_1px)] bg-[size:32px_32px]" />
+        {/* Subtle cyber grid lines for depth */}
+        <div className="absolute inset-0 opacity-15 bg-[linear-gradient(to_right,#06b6d4_1px,transparent_1px),linear-gradient(to_bottom,#06b6d4_1px,transparent_1px)] bg-[size:36px_36px] pointer-events-none" />
 
-        {/* Hit Quality Feedback Popup */}
-        {hitFeedback && (
-          <div
-            key={hitFeedback.id}
-            className={`absolute top-8 left-1/2 -translate-x-1/2 font-black text-xl tracking-wider pointer-events-none drop-shadow-md animate-out fade-out slide-out-to-top-4 duration-300 ${hitFeedback.color}`}
-          >
-            {hitFeedback.text}
+        {/* Slow-mo Frost Ambient Overlay */}
+        {slowMoActive && (
+          <div className="absolute inset-0 bg-cyan-500/10 backdrop-blur-[1px] border-2 border-cyan-400/40 pointer-events-none z-10 flex items-center justify-center">
+            <span className="px-3 py-1 rounded-full bg-cyan-500/20 text-cyan-300 font-mono font-bold text-xs tracking-widest border border-cyan-400/40">
+              ❄️ CHRONO SLOW-MO
+            </span>
           </div>
         )}
 
-        {/* Active Pulse Spheres */}
+        {/* Particle Sparks Burst */}
+        {particles.map(p => (
+          <div
+            key={p.id}
+            className="absolute rounded-full pointer-events-none"
+            style={{
+              left: `${p.x}%`,
+              top: `${p.y}%`,
+              backgroundColor: p.color,
+              width: `${p.size}px`,
+              height: `${p.size}px`,
+              boxShadow: `0 0 8px ${p.color}`,
+              animation: 'particleBurst 500ms ease-out forwards',
+              transform: `translate(${p.tx}px, ${p.ty}px)`,
+              opacity: 0,
+              transition: 'transform 500ms cubic-bezier(0,0,0.2,1), opacity 500ms ease-out',
+            }}
+          />
+        ))}
+
+        {/* Floating Score Popups at Tap Coordinates */}
+        {floatingScores.map(item => (
+          <div
+            key={item.id}
+            style={{
+              left: `${item.x}%`,
+              top: `${item.y}%`,
+            }}
+            className="absolute -translate-x-1/2 -translate-y-1/2 pointer-events-none z-30 flex flex-col items-center anim-hit-float drop-shadow-[0_2px_10px_rgba(0,0,0,0.8)]"
+          >
+            <span className={`font-black text-lg tracking-wider font-mono ${item.color}`}>
+              {item.text}
+            </span>
+            {item.points && (
+              <span className="text-xs font-bold font-mono text-white/90">
+                {item.points}
+              </span>
+            )}
+          </div>
+        ))}
+
+        {/* Active Pulse Spheres with GPU-accelerated Collapsing Rings */}
         {targets.map(target => {
           const isHazard = target.type === 'hazard';
           const isGolden = target.type === 'golden';
@@ -415,35 +548,35 @@ export const SoloGame: React.FC<SoloGameProps> = ({
                 left: `${target.x}%`,
                 top: `${target.y}%`,
               }}
-              onTouchStart={(e) => handleTargetTap(target, e)}
-              onMouseDown={(e) => handleTargetTap(target, e)}
-              className="absolute -translate-x-1/2 -translate-y-1/2 w-20 h-20 flex items-center justify-center cursor-pointer active:scale-95 transition-transform"
+              onPointerDown={(e) => handleTargetTap(target, e)}
+              className="absolute -translate-x-1/2 -translate-y-1/2 w-20 h-20 flex items-center justify-center cursor-pointer select-none touch-none active:scale-90 transition-transform"
             >
-              {/* Outer Collapsing Ring */}
+              {/* Outer Collapsing Ring (Exact Timing Cue) */}
               <div
                 style={{
                   animationDuration: `${target.duration}ms`,
                   borderColor: target.color,
+                  boxShadow: `0 0 10px ${target.color}88`,
                 }}
-                className="absolute inset-0 rounded-full border-2 opacity-85 animate-ping pointer-events-none"
+                className="absolute inset-0 rounded-full border-2 anim-collapse-ring pointer-events-none"
               />
 
-              {/* Secondary timing guide ring */}
+              {/* Target Boundary Guide */}
               <div
                 style={{
-                  animationDuration: `${target.duration}ms`,
-                  borderColor: target.color,
+                  animationDuration: '8s',
+                  borderColor: `${target.color}66`,
                 }}
-                className="absolute inset-2 rounded-full border border-dashed opacity-60 animate-spin pointer-events-none"
+                className="absolute inset-2 rounded-full border border-dashed opacity-70 pointer-events-none animate-spin"
               />
 
               {/* Core Touch Sphere */}
               <div
                 style={{
                   backgroundColor: isHazard ? '#ef4444' : isGolden ? '#f59e0b' : isFreeze ? '#06b6d4' : isSurge ? '#8b5cf6' : '#0284c7',
-                  boxShadow: `0 0 16px ${target.color}`,
+                  boxShadow: `0 0 18px ${target.color}`,
                 }}
-                className="w-12 h-12 rounded-full flex items-center justify-center font-black text-slate-950 text-xs shadow-lg transition transform"
+                className="w-12 h-12 rounded-full flex items-center justify-center font-black text-slate-950 text-xs shadow-lg transition-transform pointer-events-none"
               >
                 {isHazard ? (
                   <Zap className="w-5 h-5 text-white fill-white animate-bounce" />
@@ -454,7 +587,7 @@ export const SoloGame: React.FC<SoloGameProps> = ({
                 ) : isSurge ? (
                   <Shield className="w-5 h-5 text-white fill-white" />
                 ) : (
-                  <span className="text-white font-mono font-bold text-sm">TAP</span>
+                  <span className="text-white font-mono font-extrabold text-xs">PULSE</span>
                 )}
               </div>
             </div>
@@ -480,13 +613,13 @@ export const SoloGame: React.FC<SoloGameProps> = ({
             <div className="space-y-3 w-48">
               <button
                 onClick={() => setGameState('playing')}
-                className="w-full py-3 rounded-xl bg-cyan-500 text-slate-950 font-bold text-sm flex items-center justify-center gap-2 hover:bg-cyan-400"
+                className="w-full py-3 rounded-xl bg-cyan-500 text-slate-950 font-bold text-sm flex items-center justify-center gap-2 hover:bg-cyan-400 active:scale-95 transition"
               >
                 <Play className="w-4 h-4" /> Resume
               </button>
               <button
                 onClick={onBackToMenu}
-                className="w-full py-3 rounded-xl bg-slate-800 text-slate-200 font-bold text-sm flex items-center justify-center gap-2 hover:bg-slate-700"
+                className="w-full py-3 rounded-xl bg-slate-800 text-slate-200 font-bold text-sm flex items-center justify-center gap-2 hover:bg-slate-700 active:scale-95 transition"
               >
                 <ArrowLeft className="w-4 h-4" /> Main Menu
               </button>
@@ -556,6 +689,8 @@ export const SoloGame: React.FC<SoloGameProps> = ({
                     setGreatCount(0);
                     setMissCount(0);
                     setReactionTimes([]);
+                    setFloatingScores([]);
+                    setParticles([]);
                     setCountdown(3);
                     setGameState('countdown');
                   }}
@@ -578,3 +713,4 @@ export const SoloGame: React.FC<SoloGameProps> = ({
     </div>
   );
 };
+

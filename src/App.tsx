@@ -177,6 +177,43 @@ export default function App() {
         {/* VIEW: MAIN MENU */}
         {view === 'menu' && (
           <div className="w-full max-w-md mx-auto p-4 flex flex-col gap-4 animate-in fade-in duration-200">
+            {/* Cyber Arcade Visual Artwork Banner */}
+            <div className="relative w-full h-32 rounded-3xl overflow-hidden border border-cyan-500/30 bg-gradient-to-r from-cyan-950 via-slate-900 to-rose-950 shadow-xl shadow-cyan-950/40 flex items-center justify-between px-5">
+              {/* Background Animated Energy Grid & Rings */}
+              <svg className="absolute inset-0 w-full h-full pointer-events-none opacity-40" xmlns="http://www.w3.org/2000/svg">
+                <defs>
+                  <linearGradient id="artGlow" x1="0%" y1="0%" x2="100%" y2="100%">
+                    <stop offset="0%" stopColor="#06b6d4" />
+                    <stop offset="50%" stopColor="#8b5cf6" />
+                    <stop offset="100%" stopColor="#ec4899" />
+                  </linearGradient>
+                </defs>
+                <circle cx="88%" cy="50%" r="70" fill="none" stroke="url(#artGlow)" strokeWidth="2" strokeDasharray="6 6" />
+                <circle cx="88%" cy="50%" r="45" fill="none" stroke="#06b6d4" strokeWidth="2.5" />
+                <circle cx="88%" cy="50%" r="20" fill="#06b6d4" fillOpacity="0.4" />
+                <path d="M 0 64 Q 150 10 300 64 T 600 64" fill="none" stroke="#38bdf8" strokeWidth="1.5" opacity="0.3" />
+                <path d="M 0 80 Q 180 120 360 80 T 700 80" fill="none" stroke="#ec4899" strokeWidth="1.5" opacity="0.25" />
+              </svg>
+
+              <div className="relative z-10">
+                <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-cyan-500/20 border border-cyan-400/40 text-[10px] font-mono font-bold text-cyan-300 w-fit mb-1.5">
+                  <Zap className="w-3 h-3 text-cyan-400 fill-cyan-400 animate-pulse" /> 60 FPS ULTRA RESPONSIVE
+                </div>
+                <h1 className="text-2xl font-black tracking-tight text-white font-sans drop-shadow-sm leading-tight">
+                  HYPER<span className="text-cyan-400">PULSE</span>
+                </h1>
+                <p className="text-[11px] text-slate-300 font-medium">
+                  Fast-Paced Touch Duel & Reflex Rush
+                </p>
+              </div>
+
+              <div className="relative z-10 flex flex-col items-center">
+                <div className="w-14 h-14 rounded-2xl bg-cyan-500/20 border border-cyan-400/50 flex items-center justify-center shadow-[0_0_20px_rgba(6,182,212,0.4)]">
+                  <Flame className="w-7 h-7 text-cyan-300 fill-cyan-400 animate-pulse" />
+                </div>
+              </div>
+            </div>
+
             {/* Player Quick Status Hero */}
             <div className={`p-4 rounded-3xl border shadow-xl relative overflow-hidden ${
               isDark

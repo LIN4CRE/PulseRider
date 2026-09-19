@@ -213,6 +213,37 @@ export function clearQueuedOfflineSync() {
   } catch (e) {}
 }
 
+// Direct Leaderboard Submission
+export async function submitToLeaderboard(payload: {
+  username?: string;
+  avatar?: string;
+  score?: number;
+  maxCombo?: number;
+  accuracy?: number;
+  mode?: 'solo' | 'local_duel';
+  duelDetail?: {
+    player1: string;
+    player2: string;
+    score1: number;
+    score2: number;
+    winner: string;
+  };
+}) {
+  try {
+    const res = await fetch('/api/leaderboard/submit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (res.ok) {
+      return await res.json();
+    }
+  } catch (e) {
+    console.warn('Failed to submit score to leaderboard:', e);
+  }
+  return null;
+}
+
 // Cloud API methods
 export async function backupToCloud(profile: UserProfile, analytics?: any): Promise<{ success: boolean; syncCode: string; message: string }> {
   try {

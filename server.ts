@@ -183,7 +183,7 @@ async function startServer() {
     });
   });
 
-  app.post("/api/leaderboard/submit", (req, res) => {
+  const handleLeaderboardSubmit = (req: express.Request, res: express.Response) => {
     const { username, avatar, score, maxCombo, accuracy, mode, duelDetail } = req.body;
 
     if (mode === "local_duel" && duelDetail) {
@@ -226,7 +226,10 @@ async function startServer() {
     }
 
     res.json({ success: true, global: leaderboard });
-  });
+  };
+
+  app.post("/api/leaderboard/submit", handleLeaderboardSubmit);
+  app.post("/api/leaderboard", handleLeaderboardSubmit);
 
   // Events & Notifications endpoint
   app.get("/api/events", (_req, res) => {
